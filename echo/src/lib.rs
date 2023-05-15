@@ -1,32 +1,32 @@
-use std::io::{Write, StdoutLock};
+use std::io::{StdoutLock, Write};
 
-use serde::{Deserialize, Serialize};
-use anyhow::{self, Context, bail};
+use anyhow::{self, Context};
+use serde::{de::DeserializeOwned, Deserialize, Serialize};
 
 #[derive(Serialize, Deserialize, Debug)]
-pub struct Message {
-    src: String,
-    dest: String,
-    body: Body,
+pub struct Message<Req, Res> {
+    pub src: String,
+    pub dest: String,
+    pub body: Body<Req, Res>,
 }
 
 #[derive(Serialize, Deserialize, Debug)]
-struct Body {
-    msg_id: Option<usize>,
-    in_reply_to: Option<usize>,
+pub struct Body<Req, Res> {
+    pub msg_id: Option<usize>,
+    pub in_reply_to: Option<usize>,
     #[serde(flatten)]
-    payload: Payload,
+    pub payload: Payload<Req, Res>,
 }
 
 #[derive(Serialize, Deserialize, Debug)]
 #[serde(untagged)]
-enum Payload {
-    Request(Request),
-    Response(Response),
+pub enum Payload<Req, Res> {
+    Request(Req),
+    Response(Res),
 }
 
-impl Payload {
-    fn request(self) -> Option<Request> {
+impl<Req, Res> Payload<Req, Res> {
+    pub fn request(self) -> Option<Req> {
         match self {
             Payload::Request(request) => Some(request),
             Payload::Response(_) => None,
@@ -34,80 +34,46 @@ impl Payload {
     }
 }
 
-#[derive(Serialize, Deserialize, Debug)]
-#[serde(rename_all = "snake_case")]
-#[serde(tag = "type")]
-enum Request {
-    Init {
-        node_id: String,
-        node_ids: Vec<String>,
-    },
-    Echo {
-        echo: serde_json::Value
-    },
-}
+pub trait Node<Req, Res>
+where
+    Req: Serialize + DeserializeOwned,
+    Res: Serialize + DeserializeOwned,
+{
+    fn init(&mut self, msg: Message<Req, Res>, output: &mut StdoutLock) -> anyhow::Result<()>;
+    fn create_reply(&mut self, msg: Message<Req, Res>) -> anyhow::Result<Message<Req, Res>>;
 
-#[derive(Serialize, Deserialize, Debug)]
-#[serde(rename_all = "snake_case")]
-#[serde(tag = "type")]
-enum Response {
-    InitOk,
-    EchoOk {
-        echo: serde_json::Value
-    }
-}
-
-#[derive(Debug, Default)]
-pub struct EchoNode {
-    name: Option<String>,
-    msg_id: usize,
-}
-
-impl EchoNode {
-    pub fn init(msg: &Message) -> anyhow::Result<EchoNode> {
-        let payload = &msg.body.payload;
-        match payload {
-            Payload::Request(Request::Init { node_id, .. }) => Ok(EchoNode { name: Some(node_id.clone()), ..EchoNode::default() }),
-            _ => bail!("Tried to initialise node with wrong payload variant"),
-        }
-    }
-
-    fn create_reply(&mut self, msg: Message) -> anyhow::Result<Message> {
-        let reply: Message;
-        let request = msg.body.payload.request().ok_or(anyhow::anyhow!("Message payload is not a request"))?;
-        match request {
-            Request::Init { node_id, .. } => {
-                self.name = Some(node_id);
-                reply = Message {
-                    src: self.name.clone().unwrap(),
-                    dest: msg.src.clone(),
-                    body: Body {
-                        msg_id: None,
-                        in_reply_to: msg.body.msg_id,
-                        payload: Payload::Response(Response::InitOk)
-                    }
-                };
-            }
-            Request::Echo { echo } => {
-                reply = Message {
-                    src: self.name.clone().unwrap(),
-                    dest: msg.src.clone(),
-                    body: Body {
-                        msg_id: Some(self.msg_id) ,
-                        in_reply_to: msg.body.msg_id,
-                        payload: Payload::Response(Response::EchoOk { echo })
-                    }
-                };
-            }
-        }
-        self.msg_id += 1;
-        Ok(reply)
-    }
-
-    pub fn reply(&mut self, msg: Message, output: &mut StdoutLock) -> anyhow::Result<()> {
+    fn reply(&mut self, msg: Message<Req, Res>, output: &mut StdoutLock) -> anyhow::Result<()> {
         let reply = self.create_reply(msg)?;
         serde_json::to_writer(&mut *output, &reply).context("Writing to stdout")?;
-        output.write_all(b"\n").context("Writing newline to stdout")?;
+        output
+            .write_all(b"\n")
+            .context("Writing newline to stdout")?;
         Ok(())
     }
+}
+
+pub fn run<S, Req, Res>(mut node: S) -> anyhow::Result<()>
+where
+    S: Node<Req, Res>,
+    Res: Serialize + DeserializeOwned,
+    Req: Serialize + DeserializeOwned,
+{
+    let stdin = std::io::stdin().lock();
+    let mut stdout = std::io::stdout().lock();
+
+    let mut stdin_messages =
+        serde_json::Deserializer::from_reader(stdin).into_iter::<Message<Req, Res>>();
+    let init_msg = stdin_messages.next();
+
+    let init_msg = init_msg
+        .expect("init message must be present")
+        .context("could not deserialize init message")?;
+
+    node.init(init_msg, &mut stdout)
+        .context("error initialising node")?;
+    for msg in stdin_messages {
+        let msg = msg.context("Couldn't deserialize message")?;
+        node.reply(msg, &mut stdout)?;
+    }
+    Ok(())
 }
