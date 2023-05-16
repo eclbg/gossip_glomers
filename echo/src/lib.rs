@@ -84,7 +84,6 @@ where
     let stdin = std::io::stdin().lock();
     let mut stdin = stdin.lines();
     let mut stdout = std::io::stdout().lock();
-    // let mut stderr = std::io::stderr().lock();
 
     let init_msg: Message<InitRequest, InitResponse> = serde_json::from_str(
         &stdin

@@ -42,7 +42,7 @@ impl Node<(), EchoRequest, EchoResponse> for EchoNode {
             src: msg.dest,
             dest: msg.src,
             body: Body {
-                msg_id: None, //Some(self.msg_id),
+                msg_id: None,
                 in_reply_to: msg.body.msg_id,
                 payload: Payload::Response(EchoResponse::EchoOk { echo }),
             },
