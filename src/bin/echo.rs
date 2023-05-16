@@ -1,4 +1,4 @@
-use echo::{Body, Message, Node, Payload};
+use gossip_glomers::{Body, Message, Node, Payload};
 use serde::{Deserialize, Serialize};
 
 #[derive(Serialize, Deserialize, Debug)]
@@ -21,7 +21,7 @@ struct EchoNode {
 }
 
 impl Node<(), EchoRequest, EchoResponse> for EchoNode {
-    fn from_init(_state: (), _init: echo::Init) -> anyhow::Result<Self>
+    fn from_init(_state: (), _init: gossip_glomers::Init) -> anyhow::Result<Self>
     where
         Self: Sized,
     {
@@ -53,5 +53,5 @@ impl Node<(), EchoRequest, EchoResponse> for EchoNode {
 }
 
 fn main() -> anyhow::Result<()> {
-    echo::run::<_, EchoNode, _, _>(())
+    gossip_glomers::run::<_, EchoNode, _, _>(())
 }
