@@ -54,6 +54,13 @@ impl<Req, Res> Payload<Req, Res> {
             Payload::Response(_) => None,
         }
     }
+
+    pub fn response(self) -> Option<Res> {
+        match self {
+            Payload::Request(_) => None,
+            Payload::Response(response) => Some(response),
+        }
+    }
 }
 
 pub trait Node<S, Req, Res>
@@ -65,12 +72,13 @@ where
     where
         Self: Sized;
 
-    fn create_reply(&mut self, msg: Message<Req, Res>) -> anyhow::Result<Message<Req, Res>>;
+    fn create_reply(&mut self, msg: Message<Req, Res>) -> anyhow::Result<Option<Message<Req, Res>>>;
 
     fn reply(&mut self, msg: Message<Req, Res>, output: &mut StdoutLock) -> anyhow::Result<()> {
-        let reply = self.create_reply(msg)?;
-        serde_json::to_writer(&mut *output, &reply)?;
-        output.write_all(b"\n")?;
+        if let Some(reply) = self.create_reply(msg)? {
+            serde_json::to_writer(&mut *output, &reply)?;
+            output.write_all(b"\n")?;
+        }
         Ok(())
     }
 }

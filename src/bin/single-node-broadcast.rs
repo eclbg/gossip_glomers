@@ -41,7 +41,7 @@ impl Node<(), BroadcastRequest, BroadcastResponse> for BroadcastNode {
     fn create_reply(
         &mut self,
         msg: Message<BroadcastRequest, BroadcastResponse>,
-    ) -> anyhow::Result<Message<BroadcastRequest, BroadcastResponse>> {
+    ) -> anyhow::Result<Option<Message<BroadcastRequest, BroadcastResponse>>> {
         let request = msg
             .body
             .payload
@@ -67,7 +67,7 @@ impl Node<(), BroadcastRequest, BroadcastResponse> for BroadcastNode {
                 payload: reply_payload,
             },
         };
-        Ok(reply)
+        Ok(Some(reply))
     }
 }
 

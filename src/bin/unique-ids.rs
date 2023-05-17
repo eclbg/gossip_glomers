@@ -40,7 +40,7 @@ impl Node<(), UniqueIDRequest, UniqueIDResponse> for UniqueIDNode {
     fn create_reply(
         &mut self,
         msg: Message<UniqueIDRequest, UniqueIDResponse>,
-    ) -> anyhow::Result<Message<UniqueIDRequest, UniqueIDResponse>> {
+    ) -> anyhow::Result<Option<Message<UniqueIDRequest, UniqueIDResponse>>> {
         let guid = format!("{}-{}", self.node_id, self.msg_id);
         let reply: Message<UniqueIDRequest, UniqueIDResponse> = Message {
             src: self.node_id.clone(),
@@ -52,7 +52,7 @@ impl Node<(), UniqueIDRequest, UniqueIDResponse> for UniqueIDNode {
             },
         };
         self.msg_id += 1;
-        Ok(reply)
+        Ok(Some(reply))
     }
 }
 

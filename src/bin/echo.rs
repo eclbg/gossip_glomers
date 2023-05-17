@@ -31,7 +31,7 @@ impl Node<(), EchoRequest, EchoResponse> for EchoNode {
     fn create_reply(
         &mut self,
         msg: Message<EchoRequest, EchoResponse>,
-    ) -> anyhow::Result<Message<EchoRequest, EchoResponse>> {
+    ) -> anyhow::Result<Option<Message<EchoRequest, EchoResponse>>> {
         let request = msg
             .body
             .payload
@@ -48,7 +48,7 @@ impl Node<(), EchoRequest, EchoResponse> for EchoNode {
             },
         };
         self.msg_id += 1;
-        Ok(reply)
+        Ok(Some(reply))
     }
 }
 
