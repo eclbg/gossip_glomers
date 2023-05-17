@@ -36,8 +36,8 @@ impl Node<(), BroadcastRequest, BroadcastResponse> for BroadcastNode {
         Self: Sized,
     {
         Ok(BroadcastNode {
+            node_ids: init.node_ids.into_iter().filter(|x| x != &init.node_id).collect(),
             node_id: init.node_id,
-            node_ids: init.node_ids,
             msg_id: 1,
             messages: vec![],
         })
@@ -47,7 +47,6 @@ impl Node<(), BroadcastRequest, BroadcastResponse> for BroadcastNode {
         &mut self,
         msg: Message<BroadcastRequest, BroadcastResponse>,
     ) -> anyhow::Result<Option<Message<BroadcastRequest, BroadcastResponse>>> {
-        eprintln!("{:?}", self);
         let request = match msg.body.payload {
             Payload::Request(request) => request,
             Payload::Response(_) => return Ok(None),
