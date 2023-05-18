@@ -27,7 +27,11 @@ struct UniqueIDNode {
 }
 
 impl Node<(), UniqueIDRequest, UniqueIDResponse> for UniqueIDNode {
-    fn from_init(_state: (), init: gossip_glomers::Init) -> anyhow::Result<Self>
+    fn from_init(
+        _state: (),
+        init: gossip_glomers::Init,
+        _: std::sync::mpsc::Sender<Message<UniqueIDRequest, UniqueIDResponse>>,
+    ) -> anyhow::Result<Self>
     where
         Self: Sized,
     {

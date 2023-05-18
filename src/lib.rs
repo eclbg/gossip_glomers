@@ -1,4 +1,4 @@
-use std::io::{BufRead, StdoutLock, Write};
+use std::{io::{BufRead, StdoutLock, Write}, sync::mpsc::Sender};
 
 use anyhow::{self, Context};
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
@@ -68,7 +68,7 @@ where
     Req: Serialize + DeserializeOwned,
     Res: Serialize + DeserializeOwned,
 {
-    fn from_init(state: S, init: Init) -> anyhow::Result<Self>
+    fn from_init(state: S, init: Init, tx: Sender<Message<Req, Res>>) -> anyhow::Result<Self>
     where
         Self: Sized;
 
@@ -100,9 +100,10 @@ where
         panic!("first message should be init");
     };
 
-    let mut node: N = Node::from_init(init_state, init).context("Couldn't initialise node")?;
-
     let (tx, rx) = std::sync::mpsc::channel();
+
+    let mut node: N = Node::from_init(init_state, init, tx.clone()).context("Couldn't initialise node")?;
+
 
     std::thread::spawn(move || {
         let stdin = std::io::stdin().lock();

@@ -57,7 +57,11 @@ impl BroadcastNode {
 
 
 impl Node<(), BroadcastRequest, BroadcastResponse> for BroadcastNode {
-    fn from_init(_state: (), init: gossip_glomers::Init) -> anyhow::Result<Self>
+    fn from_init(
+        _state: (),
+        init: gossip_glomers::Init,
+        _: std::sync::mpsc::Sender<Message<BroadcastRequest, BroadcastResponse>>,
+    ) -> anyhow::Result<Self>
     where
         Self: Sized,
     {

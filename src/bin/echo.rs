@@ -23,7 +23,11 @@ struct EchoNode {
 }
 
 impl Node<(), EchoRequest, EchoResponse> for EchoNode {
-    fn from_init(_state: (), _init: gossip_glomers::Init) -> anyhow::Result<Self>
+    fn from_init(
+        _state: (),
+        _init: gossip_glomers::Init,
+        _: std::sync::mpsc::Sender<Message<EchoRequest, EchoResponse>>,
+    ) -> anyhow::Result<Self>
     where
         Self: Sized,
     {
@@ -33,7 +37,7 @@ impl Node<(), EchoRequest, EchoResponse> for EchoNode {
     fn step(
         &mut self,
         msg: Message<EchoRequest, EchoResponse>,
-        output: &mut StdoutLock
+        output: &mut StdoutLock,
     ) -> anyhow::Result<()> {
         let request = msg
             .body
