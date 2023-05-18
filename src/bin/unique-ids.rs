@@ -1,3 +1,5 @@
+use std::io::{StdoutLock, Write};
+
 use gossip_glomers::{Body, Message, Node, Payload};
 use serde::{Deserialize, Serialize};
 
@@ -12,9 +14,9 @@ pub enum UniqueIDRequest {
 #[serde(rename_all = "snake_case")]
 #[serde(tag = "type")]
 pub enum UniqueIDResponse {
-    GenerateOk { 
+    GenerateOk {
         #[serde(rename = "id")]
-        guid: String
+        guid: String,
     },
 }
 
@@ -29,18 +31,17 @@ impl Node<(), UniqueIDRequest, UniqueIDResponse> for UniqueIDNode {
     where
         Self: Sized,
     {
-        Ok(
-            UniqueIDNode {
-                node_id: init.node_id,
-                msg_id: 1 
-            }
-        )
+        Ok(UniqueIDNode {
+            node_id: init.node_id,
+            msg_id: 1,
+        })
     }
 
-    fn create_reply(
+    fn step(
         &mut self,
         msg: Message<UniqueIDRequest, UniqueIDResponse>,
-    ) -> anyhow::Result<Option<Message<UniqueIDRequest, UniqueIDResponse>>> {
+        output: &mut StdoutLock,
+    ) -> anyhow::Result<()> {
         let guid = format!("{}-{}", self.node_id, self.msg_id);
         let reply: Message<UniqueIDRequest, UniqueIDResponse> = Message {
             src: self.node_id.clone(),
@@ -52,7 +53,9 @@ impl Node<(), UniqueIDRequest, UniqueIDResponse> for UniqueIDNode {
             },
         };
         self.msg_id += 1;
-        Ok(Some(reply))
+        serde_json::to_writer(&mut *output, &reply)?;
+        output.write_all(b"\n")?;
+        Ok(())
     }
 }
 

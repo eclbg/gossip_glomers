@@ -1,5 +1,6 @@
-use std::io::Write;
+use std::{io::{Write, StdoutLock}, collections::HashMap};
 
+use anyhow::{bail, Context};
 use gossip_glomers::{Body, Message, Node, Payload};
 use serde::{Deserialize, Serialize};
 
@@ -22,34 +23,63 @@ pub enum BroadcastResponse {
     TopologyOk,
 }
 
+#[derive(Deserialize, Debug)]
+struct Topology {
+    #[serde(flatten)]
+    topology: HashMap<String, Vec<String>>,
+}
+
+impl Topology {
+    fn get(&self, key: &String) -> Option<&Vec<String>> {
+        self.topology.get(key)
+    }
+}
+
 #[derive(Debug)]
 struct BroadcastNode {
     node_id: String,
     node_ids: Vec<String>,
     msg_id: usize,
+    neighbours: Option<Vec<String>>,
     messages: Vec<usize>,
 }
+
+impl BroadcastNode {
+    fn set_neighbours(&mut self, topology: Topology) -> anyhow::Result<()> {
+        let Some(neighbours) = topology.get(&self.node_id) else {
+            bail!("node id not found in topology")
+        };
+        self.neighbours = Some(neighbours.clone());
+        eprintln!("{:?}", self);
+        Ok(())
+    }
+}
+
 
 impl Node<(), BroadcastRequest, BroadcastResponse> for BroadcastNode {
     fn from_init(_state: (), init: gossip_glomers::Init) -> anyhow::Result<Self>
     where
         Self: Sized,
     {
+        // we will receive a copy of tx
+        // and start a thread that sleeps X time and generates a gossip message 
         Ok(BroadcastNode {
             node_ids: init.node_ids.into_iter().filter(|x| x != &init.node_id).collect(),
             node_id: init.node_id,
             msg_id: 1,
+            neighbours: None,
             messages: vec![],
         })
     }
 
-    fn create_reply(
+    fn step(
         &mut self,
         msg: Message<BroadcastRequest, BroadcastResponse>,
-    ) -> anyhow::Result<Option<Message<BroadcastRequest, BroadcastResponse>>> {
+        output: &mut StdoutLock
+    ) -> anyhow::Result<()> {
         let request = match msg.body.payload {
             Payload::Request(request) => request,
-            Payload::Response(_) => return Ok(None),
+            Payload::Response(_) => return Ok(()),
         };
         let reply_payload = match request {
             BroadcastRequest::Broadcast { message } => {
@@ -73,7 +103,13 @@ impl Node<(), BroadcastRequest, BroadcastResponse> for BroadcastNode {
             BroadcastRequest::Read => Payload::Response(BroadcastResponse::ReadOk {
                 messages: self.messages.clone(),
             }),
-            BroadcastRequest::Topology { .. } => Payload::Response(BroadcastResponse::TopologyOk),
+            BroadcastRequest::Topology { topology } => {
+                let topology: Topology =
+                    serde_json::from_value(topology).context("Couldn't deserialize topology")?;
+                eprintln!("{:?}", topology);
+                self.set_neighbours(topology)?;
+                Payload::Response(BroadcastResponse::TopologyOk)
+            }
             BroadcastRequest::BroadcastEcho { message } => {
                 self.messages.push(message);
                 Payload::Response(BroadcastResponse::BroadcastOk)
@@ -89,7 +125,9 @@ impl Node<(), BroadcastRequest, BroadcastResponse> for BroadcastNode {
                 payload: reply_payload,
             },
         };
-        Ok(Some(reply))
+        serde_json::to_writer(&mut *output, &reply)?;
+        output.write_all(b"\n")?;
+        Ok(())
     }
 }
 

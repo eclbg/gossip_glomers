@@ -72,22 +72,15 @@ where
     where
         Self: Sized;
 
-    fn create_reply(&mut self, msg: Message<Req, Res>) -> anyhow::Result<Option<Message<Req, Res>>>;
+    fn step(&mut self, msg: Message<Req, Res>, output: &mut StdoutLock) -> anyhow::Result<()>;
 
-    fn reply(&mut self, msg: Message<Req, Res>, output: &mut StdoutLock) -> anyhow::Result<()> {
-        if let Some(reply) = self.create_reply(msg)? {
-            serde_json::to_writer(&mut *output, &reply)?;
-            output.write_all(b"\n")?;
-        }
-        Ok(())
-    }
 }
 
 pub fn run<S, N, Req, Res>(init_state: S) -> anyhow::Result<()>
 where
     N: Node<S, Req, Res>,
-    Res: Serialize + DeserializeOwned,
-    Req: Serialize + DeserializeOwned,
+    Res: Serialize + DeserializeOwned + Send + 'static,
+    Req: Serialize + DeserializeOwned + Send + 'static,
 {
     let stdin = std::io::stdin().lock();
     let mut stdin = stdin.lines();
@@ -101,11 +94,26 @@ where
     )
     .context("couldn't deserialize init message")?;
 
+    drop(stdin);
+
     let Payload::Request(InitRequest::Init(init)) = init_msg.body.payload else {
         panic!("first message should be init");
     };
 
     let mut node: N = Node::from_init(init_state, init).context("Couldn't initialise node")?;
+
+    let (tx, rx) = std::sync::mpsc::channel();
+
+    std::thread::spawn(move || {
+        let stdin = std::io::stdin().lock();
+        let stdin = stdin.lines();
+        for msg in stdin {
+            let msg = msg.expect("error reading from stdin");
+            let msg: Message<Req, Res> =
+                serde_json::from_str(&msg).context("Couldn't deserialize message").unwrap();
+            tx.send(msg).unwrap()
+        }
+    });
 
     let reply = Message::<InitRequest, InitResponse> {
         src: init_msg.dest,
@@ -121,11 +129,9 @@ where
         .write_all(b"\n")
         .context("error writing newline to stdout")?;
 
-    for msg in stdin {
-        let msg = msg.expect("error reading from stdin");
-        let msg: Message<Req, Res> =
-            serde_json::from_str(&msg).context("Couldn't deserialize message")?;
-        node.reply(msg, &mut stdout)?;
+
+    for msg in rx {
+        node.step(msg, &mut stdout)?
     }
     Ok(())
 }

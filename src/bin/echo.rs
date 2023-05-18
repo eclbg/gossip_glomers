@@ -1,3 +1,5 @@
+use std::io::{StdoutLock, Write};
+
 use gossip_glomers::{Body, Message, Node, Payload};
 use serde::{Deserialize, Serialize};
 
@@ -28,10 +30,11 @@ impl Node<(), EchoRequest, EchoResponse> for EchoNode {
         Ok(EchoNode { msg_id: 1 })
     }
 
-    fn create_reply(
+    fn step(
         &mut self,
         msg: Message<EchoRequest, EchoResponse>,
-    ) -> anyhow::Result<Option<Message<EchoRequest, EchoResponse>>> {
+        output: &mut StdoutLock
+    ) -> anyhow::Result<()> {
         let request = msg
             .body
             .payload
@@ -48,7 +51,9 @@ impl Node<(), EchoRequest, EchoResponse> for EchoNode {
             },
         };
         self.msg_id += 1;
-        Ok(Some(reply))
+        serde_json::to_writer(&mut *output, &reply)?;
+        output.write_all(b"\n")?;
+        Ok(())
     }
 }
 

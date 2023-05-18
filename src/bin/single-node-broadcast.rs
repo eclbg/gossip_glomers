@@ -1,3 +1,5 @@
+use std::io::{StdoutLock, Write};
+
 use gossip_glomers::{Body, Message, Node, Payload};
 use serde::{Deserialize, Serialize};
 
@@ -38,10 +40,11 @@ impl Node<(), BroadcastRequest, BroadcastResponse> for BroadcastNode {
         })
     }
 
-    fn create_reply(
+    fn step(
         &mut self,
         msg: Message<BroadcastRequest, BroadcastResponse>,
-    ) -> anyhow::Result<Option<Message<BroadcastRequest, BroadcastResponse>>> {
+        output: &mut StdoutLock,
+    ) -> anyhow::Result<()> {
         let request = msg
             .body
             .payload
@@ -52,9 +55,9 @@ impl Node<(), BroadcastRequest, BroadcastResponse> for BroadcastNode {
                 self.messages.push(message);
                 Payload::Response(BroadcastResponse::BroadcastOk)
             }
-            BroadcastRequest::Read => {
-                Payload::Response(BroadcastResponse::ReadOk { messages: self.messages.clone() })
-            }
+            BroadcastRequest::Read => Payload::Response(BroadcastResponse::ReadOk {
+                messages: self.messages.clone(),
+            }),
             BroadcastRequest::Topology { .. } => Payload::Response(BroadcastResponse::TopologyOk),
         };
         self.msg_id += 1;
@@ -67,7 +70,9 @@ impl Node<(), BroadcastRequest, BroadcastResponse> for BroadcastNode {
                 payload: reply_payload,
             },
         };
-        Ok(Some(reply))
+        serde_json::to_writer(&mut *output, &reply)?;
+        output.write_all(b"\n")?;
+        Ok(())
     }
 }
 
