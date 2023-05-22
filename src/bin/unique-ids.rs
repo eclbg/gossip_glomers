@@ -1,6 +1,6 @@
 use std::io::{StdoutLock, Write};
 
-use gossip_glomers::{Body, Message, Node, Payload};
+use gossip_glomers::{Body, Message, Node, Payload, Event};
 use serde::{Deserialize, Serialize};
 
 #[derive(Serialize, Deserialize, Debug)]
@@ -30,7 +30,7 @@ impl Node<(), UniqueIDRequest, UniqueIDResponse> for UniqueIDNode {
     fn from_init(
         _state: (),
         init: gossip_glomers::Init,
-        _: std::sync::mpsc::Sender<Message<UniqueIDRequest, UniqueIDResponse>>,
+        _: std::sync::mpsc::Sender<Event<UniqueIDRequest, UniqueIDResponse, ()>>,
     ) -> anyhow::Result<Self>
     where
         Self: Sized,
@@ -43,9 +43,12 @@ impl Node<(), UniqueIDRequest, UniqueIDResponse> for UniqueIDNode {
 
     fn step(
         &mut self,
-        msg: Message<UniqueIDRequest, UniqueIDResponse>,
+        msg: Event<UniqueIDRequest, UniqueIDResponse, ()>,
         output: &mut StdoutLock,
     ) -> anyhow::Result<()> {
+        let Event::Message(msg) = msg else {
+            panic!("received unexpected injected variant");
+        };
         let guid = format!("{}-{}", self.node_id, self.msg_id);
         let reply: Message<UniqueIDRequest, UniqueIDResponse> = Message {
             src: self.node_id.clone(),
@@ -64,5 +67,5 @@ impl Node<(), UniqueIDRequest, UniqueIDResponse> for UniqueIDNode {
 }
 
 fn main() -> anyhow::Result<()> {
-    gossip_glomers::run::<(), UniqueIDNode, UniqueIDRequest, UniqueIDResponse>(())
+    gossip_glomers::run::<(), UniqueIDNode, _, _, _>(())
 }

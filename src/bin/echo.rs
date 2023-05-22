@@ -1,6 +1,6 @@
 use std::io::{StdoutLock, Write};
 
-use gossip_glomers::{Body, Message, Node, Payload};
+use gossip_glomers::{Body, Message, Node, Payload, Event};
 use serde::{Deserialize, Serialize};
 
 #[derive(Serialize, Deserialize, Debug)]
@@ -26,7 +26,7 @@ impl Node<(), EchoRequest, EchoResponse> for EchoNode {
     fn from_init(
         _state: (),
         _init: gossip_glomers::Init,
-        _: std::sync::mpsc::Sender<Message<EchoRequest, EchoResponse>>,
+        _: std::sync::mpsc::Sender<Event<EchoRequest, EchoResponse, ()>>,
     ) -> anyhow::Result<Self>
     where
         Self: Sized,
@@ -36,9 +36,13 @@ impl Node<(), EchoRequest, EchoResponse> for EchoNode {
 
     fn step(
         &mut self,
-        msg: Message<EchoRequest, EchoResponse>,
+        msg: Event<EchoRequest, EchoResponse, ()>,
         output: &mut StdoutLock,
     ) -> anyhow::Result<()> {
+        let Event::Message(msg) = msg else {
+            panic!("received unexpected injected variant");
+        };
+
         let request = msg
             .body
             .payload
@@ -62,5 +66,5 @@ impl Node<(), EchoRequest, EchoResponse> for EchoNode {
 }
 
 fn main() -> anyhow::Result<()> {
-    gossip_glomers::run::<_, EchoNode, _, _>(())
+    gossip_glomers::run::<_, EchoNode, _, _, _>(())
 }

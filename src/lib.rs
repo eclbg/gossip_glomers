@@ -1,7 +1,15 @@
-use std::{io::{BufRead, StdoutLock, Write}, sync::mpsc::Sender};
+use std::{
+    io::{BufRead, StdoutLock, Write},
+    sync::mpsc::Sender,
+};
 
 use anyhow::{self, Context};
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
+
+pub enum Event<Req, Res, Inj> {
+    Message(Message<Req, Res>),
+    Injected(Inj),
+}
 
 #[derive(Serialize, Deserialize, Debug)]
 pub struct Message<Req, Res> {
@@ -63,24 +71,24 @@ impl<Req, Res> Payload<Req, Res> {
     }
 }
 
-pub trait Node<S, Req, Res>
+pub trait Node<S, Req, Res, Inj = ()>
 where
     Req: Serialize + DeserializeOwned,
     Res: Serialize + DeserializeOwned,
 {
-    fn from_init(state: S, init: Init, tx: Sender<Message<Req, Res>>) -> anyhow::Result<Self>
+    fn from_init(state: S, init: Init, tx: Sender<Event<Req, Res, Inj>>) -> anyhow::Result<Self>
     where
         Self: Sized;
 
-    fn step(&mut self, msg: Message<Req, Res>, output: &mut StdoutLock) -> anyhow::Result<()>;
-
+    fn step(&mut self, msg: Event<Req, Res, Inj>, output: &mut StdoutLock) -> anyhow::Result<()>;
 }
 
-pub fn run<S, N, Req, Res>(init_state: S) -> anyhow::Result<()>
+pub fn run<S, N, Req, Res, Inj>(init_state: S) -> anyhow::Result<()>
 where
-    N: Node<S, Req, Res>,
+    N: Node<S, Req, Res, Inj> + Send,
     Res: Serialize + DeserializeOwned + Send + 'static,
     Req: Serialize + DeserializeOwned + Send + 'static,
+    Inj: Send + 'static,
 {
     let stdin = std::io::stdin().lock();
     let mut stdin = stdin.lines();
@@ -102,18 +110,20 @@ where
 
     let (tx, rx) = std::sync::mpsc::channel();
 
-    let mut node: N = Node::from_init(init_state, init, tx.clone()).context("Couldn't initialise node")?;
-
+    let mut node: N =
+        Node::from_init(init_state, init, tx.clone()).context("Couldn't initialise node")?;
 
     std::thread::spawn(move || {
         let stdin = std::io::stdin().lock();
         let stdin = stdin.lines();
-        for msg in stdin {
-            let msg = msg.expect("error reading from stdin");
-            let msg: Message<Req, Res> =
-                serde_json::from_str(&msg).context("Couldn't deserialize message").unwrap();
-            tx.send(msg).unwrap()
+        for line in stdin {
+            let line = line.expect("error reading from stdin");
+            let msg: Message<Req, Res> = serde_json::from_str(&line).expect("error deserializing");
+            if let Err(_) = tx.send(Event::Message(msg)) {
+                return Ok::<_, anyhow::Error>(());
+            }
         }
+        Ok(())
     });
 
     let reply = Message::<InitRequest, InitResponse> {
@@ -129,7 +139,6 @@ where
     stdout
         .write_all(b"\n")
         .context("error writing newline to stdout")?;
-
 
     for msg in rx {
         node.step(msg, &mut stdout)?

@@ -1,7 +1,7 @@
 use std::{io::{Write, StdoutLock}, collections::HashMap};
 
 use anyhow::{bail, Context};
-use gossip_glomers::{Body, Message, Node, Payload};
+use gossip_glomers::{Body, Message, Node, Payload, Event};
 use serde::{Deserialize, Serialize};
 
 #[derive(Serialize, Deserialize, Debug)]
@@ -56,11 +56,11 @@ impl BroadcastNode {
 }
 
 
-impl Node<(), BroadcastRequest, BroadcastResponse> for BroadcastNode {
+impl Node<(), BroadcastRequest, BroadcastResponse, ()> for BroadcastNode {
     fn from_init(
         _state: (),
         init: gossip_glomers::Init,
-        _: std::sync::mpsc::Sender<Message<BroadcastRequest, BroadcastResponse>>,
+        _: std::sync::mpsc::Sender<Event<BroadcastRequest, BroadcastResponse, ()>>,
     ) -> anyhow::Result<Self>
     where
         Self: Sized,
@@ -78,9 +78,12 @@ impl Node<(), BroadcastRequest, BroadcastResponse> for BroadcastNode {
 
     fn step(
         &mut self,
-        msg: Message<BroadcastRequest, BroadcastResponse>,
+        msg: Event<BroadcastRequest, BroadcastResponse, ()>,
         output: &mut StdoutLock
     ) -> anyhow::Result<()> {
+        let Event::Message(msg) = msg else {
+            panic!("received unexpected injected variant");
+        };
         let request = match msg.body.payload {
             Payload::Request(request) => request,
             Payload::Response(_) => return Ok(()),
@@ -136,5 +139,5 @@ impl Node<(), BroadcastRequest, BroadcastResponse> for BroadcastNode {
 }
 
 fn main() -> anyhow::Result<()> {
-    gossip_glomers::run::<(), BroadcastNode, BroadcastRequest, BroadcastResponse>(())
+    gossip_glomers::run::<(), BroadcastNode, BroadcastRequest, BroadcastResponse, ()>(())
 }
