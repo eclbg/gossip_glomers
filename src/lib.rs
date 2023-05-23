@@ -121,7 +121,7 @@ where
         for line in stdin {
             let line = line.expect("error reading from stdin");
             let msg: Message<Req, Res> = serde_json::from_str(&line).expect("error deserializing");
-            if let Err(_) = tx.send(Event::Message(msg)) {
+            if tx.send(Event::Message(msg)).is_err() {
                 return Ok::<_, anyhow::Error>(());
             }
         }
