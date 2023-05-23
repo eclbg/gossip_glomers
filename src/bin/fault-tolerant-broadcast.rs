@@ -4,7 +4,7 @@ use std::{
     time::Duration,
 };
 
-use anyhow::{bail, Context};
+use anyhow::Context;
 use gossip_glomers::{Body, Event, Message, MessageId, Node, Payload};
 use serde::{Deserialize, Serialize};
 
@@ -25,43 +25,40 @@ pub enum BroadcastResponse {
     BroadcastOk,
     ReadOk { messages: HashSet<usize> },
     TopologyOk,
-    GossipOk,
-}
-
-#[derive(Deserialize, Debug)]
-struct Topology {
-    #[serde(flatten)]
-    topology: HashMap<String, Vec<String>>,
-}
-
-impl Topology {
-    fn get(&self, key: &String) -> Option<&Vec<String>> {
-        self.topology.get(key)
-    }
 }
 
 #[derive(Debug)]
 struct BroadcastNode {
     node_id: String,
     msg_id: MessageId,
-    // node_ids: Vec<String>,
     neighbours: Option<Vec<String>>,
     messages: HashSet<usize>,
     known_by_neighbours: HashMap<String, HashSet<usize>>,
 }
 
 impl BroadcastNode {
-    fn set_neighbours(&mut self, topology: Topology) -> anyhow::Result<()> {
-        let Some(neighbours) = topology.get(&self.node_id) else {
-            bail!("node id not found in topology")
-        };
-        self.neighbours = Some(neighbours.clone());
-        eprintln!("{:?}", self.neighbours);
-        self.known_by_neighbours = neighbours
-            .into_iter()
-            .map(|nid| (nid.clone(), HashSet::new()))
-            .collect();
-        Ok(())
+    fn gossip(&self, neighbours: &Vec<String>, output: &mut StdoutLock) -> Result<(), anyhow::Error> {
+        Ok(for node_id in neighbours {
+            let known_by_node = &self.known_by_neighbours[node_id];
+            let message: Message<BroadcastRequest, BroadcastResponse> = Message {
+                src: self.node_id.clone(),
+                dest: node_id.clone(),
+                body: Body {
+                    msg_id: None,
+                    in_reply_to: None,
+                    payload: Payload::Request(BroadcastRequest::Gossip {
+                        messages: self
+                            .messages
+                            .iter()
+                            .copied()
+                            .filter(|m| !known_by_node.contains(m))
+                            .collect(),
+                    }),
+                },
+            };
+            serde_json::to_writer(&mut *output, &message)?;
+            output.write_all(b"\n")?;
+        })
     }
 }
 
@@ -103,6 +100,7 @@ impl Node<(), BroadcastRequest, BroadcastResponse, Injected> for BroadcastNode {
         let neighbours: Vec<String> = if is_leader {
             // exclude ourselves. Leader is always first in the chunk
             let mut neighbours: Vec<String> = neighbourhood[1..].to_vec();
+            // Add other leaders: first of every other chunk
             neighbours.extend(
                 node_ids
                     .chunks(neighbourhood_size)
@@ -113,14 +111,13 @@ impl Node<(), BroadcastRequest, BroadcastResponse, Injected> for BroadcastNode {
             );
             neighbours
         } else {
-            // only neighbour is the leader
+            // the leader is the only neighbour
             neighbourhood[0..1].to_vec()
         };
 
         let node = BroadcastNode {
             node_id: init.node_id,
             msg_id: 1,
-            // node_ids: init.node_ids,
             neighbours: Some(neighbours.clone()),
             known_by_neighbours: neighbours
                 .into_iter()
@@ -152,45 +149,14 @@ impl Node<(), BroadcastRequest, BroadcastResponse, Injected> for BroadcastNode {
                 // What should we do when Gossip is received?
                 // We need to send the actual Gossip message to our neighbours
                 if let Some(neighbours) = &self.neighbours {
-                    for node_id in neighbours {
-                        let known_by_node = &self.known_by_neighbours[node_id];
-                        let message: Message<BroadcastRequest, BroadcastResponse> = Message {
-                            src: self.node_id.clone(),
-                            dest: node_id.clone(),
-                            body: Body {
-                                msg_id: Some(self.msg_id),
-                                in_reply_to: None,
-                                payload: Payload::Request(BroadcastRequest::Gossip {
-                                    messages: self
-                                        .messages
-                                        .iter()
-                                        .copied()
-                                        .filter(|m| !known_by_node.contains(m))
-                                        .collect(),
-                                }),
-                            },
-                        };
-                        serde_json::to_writer(&mut *output, &message)?;
-                        output.write_all(b"\n")?;
-                    }
+                    self.gossip(neighbours, output).context("error gossiping")?;
                 }
                 // kinda ugly returning like this
                 return Ok(());
             }
         };
-        let request = match msg.body.payload {
-            Payload::Request(request) => request,
-            Payload::Response(response) => {
-                match response {
-                    BroadcastResponse::GossipOk => {
-                        // Should we store that the node in question knows about the messages we sent
-                    }
-                    BroadcastResponse::BroadcastOk
-                    | BroadcastResponse::ReadOk { .. }
-                    | BroadcastResponse::TopologyOk => {}
-                }
-                return Ok(());
-            }
+        let Payload::Request(request) = msg.body.payload else {
+            return Ok(())
         };
         let reply_payload = match request {
             BroadcastRequest::Broadcast { message } => {
@@ -201,9 +167,7 @@ impl Node<(), BroadcastRequest, BroadcastResponse, Injected> for BroadcastNode {
                 messages: self.messages.clone(),
             })),
             BroadcastRequest::Topology { .. } => {
-                // let topology: Topology =
-                //     serde_json::from_value(topology).context("Couldn't deserialize topology")?;
-                // self.set_neighbours(topology)?;
+                // We ignore the provided topology
                 Some(Payload::Response(BroadcastResponse::TopologyOk))
             }
             BroadcastRequest::Gossip { messages } => {
@@ -212,6 +176,7 @@ impl Node<(), BroadcastRequest, BroadcastResponse, Injected> for BroadcastNode {
                     .expect("Received gossip from unknown node")
                     .extend(messages.iter().copied());
                 self.messages.extend(messages);
+                // We don't reply to Gossip messages
                 None
             }
         };
