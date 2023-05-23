@@ -38,7 +38,7 @@ struct BroadcastNode {
 
 impl BroadcastNode {
     fn gossip(&self, neighbours: &Vec<String>, output: &mut StdoutLock) -> Result<(), anyhow::Error> {
-        Ok(for node_id in neighbours {
+        for node_id in neighbours {
             let known_by_node = &self.known_by_neighbours[node_id];
             let message: Message<BroadcastRequest, BroadcastResponse> = Message {
                 src: self.node_id.clone(),
@@ -58,7 +58,8 @@ impl BroadcastNode {
             };
             serde_json::to_writer(&mut *output, &message)?;
             output.write_all(b"\n")?;
-        })
+        };
+        Ok(())
     }
 }
 
@@ -121,7 +122,7 @@ impl Node<(), BroadcastRequest, BroadcastResponse, Injected> for BroadcastNode {
             neighbours: Some(neighbours.clone()),
             known_by_neighbours: neighbours
                 .into_iter()
-                .map(|nid| (nid.clone(), HashSet::new()))
+                .map(|nid| (nid, HashSet::new()))
                 .collect(),
             messages: HashSet::new(),
         };
@@ -130,7 +131,7 @@ impl Node<(), BroadcastRequest, BroadcastResponse, Injected> for BroadcastNode {
             loop {
                 // Send a signal to send a Gossip message every 500ms
                 std::thread::sleep(Duration::from_millis(100));
-                if let Err(_) = tx.send(Event::Injected(Injected::Gossip)) {
+                if tx.send(Event::Injected(Injected::Gossip)).is_err() {
                     break;
                 }
             }
