@@ -15,3 +15,9 @@ broadcast-multi-node:
 
 broadcast-fault-tolerant:
 	maelstrom/maelstrom test -w broadcast --bin target/debug/fault-tolerant-broadcast --node-count 5 --time-limit 20 --rate 10 --nemesis partition
+
+broadcast-latency:
+	maelstrom/maelstrom test -w broadcast --bin target/debug/fault-tolerant-broadcast  --node-count 25 --time-limit 20 --rate 100 --latency 100
+
+broadcast-latency-partitioned:
+	maelstrom/maelstrom test -w broadcast --bin target/debug/fault-tolerant-broadcast  --node-count 25 --time-limit 20 --rate 100 --latency 100 --nemesis partition
