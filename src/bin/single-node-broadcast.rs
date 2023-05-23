@@ -1,6 +1,6 @@
 use std::io::{StdoutLock, Write};
 
-use gossip_glomers::{Body, Message, Node, Payload, Event};
+use gossip_glomers::{Body, Message, MessageId, Node, Payload, Event};
 use serde::{Deserialize, Serialize};
 
 #[derive(Serialize, Deserialize, Debug)]
@@ -24,7 +24,7 @@ pub enum BroadcastResponse {
 #[derive(Debug)]
 struct BroadcastNode {
     node_id: String,
-    msg_id: usize,
+    msg_id: MessageId,
     messages: Vec<usize>,
 }
 

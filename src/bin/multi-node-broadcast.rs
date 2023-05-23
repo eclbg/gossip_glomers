@@ -1,7 +1,7 @@
 use std::{io::{Write, StdoutLock}, collections::HashMap};
 
 use anyhow::{bail, Context};
-use gossip_glomers::{Body, Message, Node, Payload, Event};
+use gossip_glomers::{Body, Message, MessageId, Node, Payload, Event};
 use serde::{Deserialize, Serialize};
 
 #[derive(Serialize, Deserialize, Debug)]
@@ -39,7 +39,7 @@ impl Topology {
 struct BroadcastNode {
     node_id: String,
     node_ids: Vec<String>,
-    msg_id: usize,
+    msg_id: MessageId,
     neighbours: Option<Vec<String>>,
     messages: Vec<usize>,
 }

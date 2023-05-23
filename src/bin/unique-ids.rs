@@ -1,6 +1,6 @@
 use std::io::{StdoutLock, Write};
 
-use gossip_glomers::{Body, Message, Node, Payload, Event};
+use gossip_glomers::{Body, Message, MessageId, Node, Payload, Event};
 use serde::{Deserialize, Serialize};
 
 #[derive(Serialize, Deserialize, Debug)]
@@ -23,7 +23,7 @@ pub enum UniqueIDResponse {
 #[derive(Debug)]
 struct UniqueIDNode {
     node_id: String,
-    msg_id: usize,
+    msg_id: MessageId,
 }
 
 impl Node<(), UniqueIDRequest, UniqueIDResponse> for UniqueIDNode {

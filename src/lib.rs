@@ -6,6 +6,8 @@ use std::{
 use anyhow::{self, Context};
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
 
+pub type MessageId = usize;
+
 pub enum Event<Req, Res, Inj> {
     Message(Message<Req, Res>),
     Injected(Inj),
@@ -21,9 +23,9 @@ pub struct Message<Req, Res> {
 #[derive(Serialize, Deserialize, Debug)]
 pub struct Body<Req, Res> {
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub msg_id: Option<usize>,
+    pub msg_id: Option<MessageId>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub in_reply_to: Option<usize>,
+    pub in_reply_to: Option<MessageId>,
     #[serde(flatten)]
     pub payload: Payload<Req, Res>,
 }
