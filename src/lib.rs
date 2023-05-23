@@ -142,8 +142,8 @@ where
         .write_all(b"\n")
         .context("error writing newline to stdout")?;
 
-    for msg in rx {
-        node.step(msg, &mut stdout)?
+    for event in rx {
+        node.step(event, &mut stdout)?
     }
     Ok(())
 }
