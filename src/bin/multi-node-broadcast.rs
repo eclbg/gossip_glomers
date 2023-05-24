@@ -1,4 +1,4 @@
-use std::{io::{Write, StdoutLock}, collections::HashMap};
+use std::{io::Write, collections::HashMap};
 
 use anyhow::{bail, Context};
 use gossip_glomers::{Body, Message, MessageId, Node, Payload, Event};
@@ -79,7 +79,7 @@ impl Node<(), BroadcastRequest, BroadcastResponse, ()> for BroadcastNode {
     fn step(
         &mut self,
         msg: Event<BroadcastRequest, BroadcastResponse, ()>,
-        output: &mut StdoutLock
+        output: &mut dyn Write
     ) -> anyhow::Result<()> {
         let Event::Message(msg) = msg else {
             panic!("received unexpected injected variant");

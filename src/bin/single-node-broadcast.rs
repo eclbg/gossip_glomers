@@ -1,4 +1,4 @@
-use std::io::{StdoutLock, Write};
+use std::io::Write;
 
 use gossip_glomers::{Body, Message, MessageId, Node, Payload, Event};
 use serde::{Deserialize, Serialize};
@@ -47,7 +47,7 @@ impl Node<(), BroadcastRequest, BroadcastResponse> for BroadcastNode {
     fn step(
         &mut self,
         msg: Event<BroadcastRequest, BroadcastResponse, ()>,
-        output: &mut StdoutLock,
+        output: &mut dyn Write,
     ) -> anyhow::Result<()> {
         let Event::Message(msg) = msg else {
             panic!("received unexpected injected variant");

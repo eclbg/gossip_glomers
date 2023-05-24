@@ -1,6 +1,6 @@
 use std::{
     io::{BufRead, StdoutLock, Write},
-    sync::mpsc::Sender,
+    sync::mpsc::Sender
 };
 
 use anyhow::{self, Context};
@@ -82,7 +82,7 @@ where
     where
         Self: Sized;
 
-    fn step(&mut self, msg: Event<Req, Res, Inj>, output: &mut StdoutLock) -> anyhow::Result<()>;
+    fn step(&mut self, msg: Event<Req, Res, Inj>, output: &mut dyn Write) -> anyhow::Result<()>;
 }
 
 pub fn run<S, N, Req, Res, Inj>(init_state: S) -> anyhow::Result<()>

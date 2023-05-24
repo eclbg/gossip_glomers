@@ -142,7 +142,7 @@ impl Node<(), BroadcastRequest, BroadcastResponse, Injected> for BroadcastNode {
     fn step(
         &mut self,
         msg: Event<BroadcastRequest, BroadcastResponse, Injected>,
-        output: &mut StdoutLock,
+        output: &mut dyn Write,
     ) -> anyhow::Result<()> {
         let msg = match msg {
             Event::Message(msg) => msg,
