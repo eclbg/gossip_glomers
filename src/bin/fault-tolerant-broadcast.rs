@@ -1,11 +1,11 @@
 use std::{
     collections::{HashMap, HashSet},
-    io::{StdoutLock, Write},
+    io::Write,
     time::Duration,
 };
 
 use anyhow::Context;
-use gossip_glomers::{Body, Event, Message, MessageId, Node, Payload};
+use gossip_glomers::{Body, Event, Message, MessageId, Node, Payload, GossipingNode};
 use serde::{Deserialize, Serialize};
 
 #[derive(Serialize, Deserialize, Debug)]
@@ -36,8 +36,8 @@ struct BroadcastNode {
     known_by_neighbours: HashMap<String, HashSet<usize>>,
 }
 
-impl BroadcastNode {
-    fn gossip(&self, neighbours: &Vec<String>, output: &mut StdoutLock) -> Result<(), anyhow::Error> {
+impl GossipingNode<BroadcastRequest, BroadcastResponse> for BroadcastNode {
+    fn gossip(&self, neighbours: &Vec<String>, output: &mut dyn Write) -> Result<(), anyhow::Error> {
         for node_id in neighbours {
             let known_by_node = &self.known_by_neighbours[node_id];
             let message: Message<BroadcastRequest, BroadcastResponse> = Message {

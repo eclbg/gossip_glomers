@@ -148,6 +148,10 @@ where
     Ok(())
 }
 
+pub trait GossipingNode<Req, Res> {
+    fn gossip(&self, node_ids: &Vec<String>, output: &mut dyn Write) -> anyhow::Result<()>;
+}
+
 #[cfg(test)]
 mod test {
     use super::*;
