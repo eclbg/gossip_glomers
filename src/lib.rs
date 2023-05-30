@@ -85,6 +85,10 @@ where
     fn step(&mut self, msg: Event<Req, Res, Inj>, output: &mut dyn Write) -> anyhow::Result<()>;
 }
 
+pub trait GossipingNode<Req, Res> {
+    fn gossip(&self, node_ids: &Vec<String>, output: &mut dyn Write) -> anyhow::Result<()>;
+}
+
 pub fn run<S, N, Req, Res, Inj>(init_state: S) -> anyhow::Result<()>
 where
     N: Node<S, Req, Res, Inj> + Send,
@@ -146,10 +150,6 @@ where
         node.step(event, &mut stdout)?
     }
     Ok(())
-}
-
-pub trait GossipingNode<Req, Res> {
-    fn gossip(&self, node_ids: &Vec<String>, output: &mut dyn Write) -> anyhow::Result<()>;
 }
 
 #[cfg(test)]

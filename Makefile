@@ -21,3 +21,6 @@ broadcast-latency:
 
 broadcast-latency-partitioned:
 	maelstrom/maelstrom test -w broadcast --bin target/debug/fault-tolerant-broadcast  --node-count 25 --time-limit 20 --rate 100 --latency 100 --nemesis partition
+
+grow-only-counter:
+	maelstrom/maelstrom test -w g-counter --bin target/debug/g-counter --node-count 3 --rate 100 --time-limit 20 --nemesis partition

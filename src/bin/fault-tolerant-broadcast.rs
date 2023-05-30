@@ -129,7 +129,7 @@ impl Node<(), BroadcastRequest, BroadcastResponse, Injected> for BroadcastNode {
 
         std::thread::spawn(move || {
             loop {
-                // Send a signal to send a Gossip message every 500ms
+                // Send a signal to send a Gossip message every 100
                 std::thread::sleep(Duration::from_millis(100));
                 if tx.send(Event::Injected(Injected::Gossip)).is_err() {
                     break;
