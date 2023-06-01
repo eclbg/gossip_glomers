@@ -49,7 +49,7 @@ mod test {
             guid: String::from("1"),
         };
         assert_eq!(
-            r#"{"type":"generate_ok","id":1}"#,
+            r#"{"type":"generate_ok","id":"1"}"#,
             serde_json::to_string::<GenerateOk>(&body).unwrap()
         )
     }
