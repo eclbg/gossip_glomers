@@ -1,7 +1,7 @@
 use async_trait::async_trait;
 use maelstrom::protocol::Message;
 use maelstrom::{done, Node, Result, Runtime};
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use std::sync::{Arc, Mutex};
 
 pub(crate) fn main() -> Result<()> {
@@ -26,31 +26,43 @@ struct Inner {
 #[async_trait]
 impl Node for Handler {
     async fn process(&self, runtime: Runtime, req: Message) -> Result<()> {
-        if req.get_type() == "broadcast" {
-            let Some(value) = req.body.extra.get("message") else {
-                panic!("malformed broadcast request")
-            };
-            { //I don't fully understand why inner has to be dropped before 
-              //returning a Future
-                let mut inner = self.inner.lock().unwrap();
-                inner.set.insert(value.as_u64().unwrap().clone());
+        let body: Result<RequestBody> = req.body.as_obj();
+        match body {
+            Ok(RequestBody::Broadcast { message }) => {
+                {
+                    //I don't fully understand why inner has to be dropped before
+                    //returning a Future
+                    let mut inner = self.inner.lock().unwrap();
+                    inner.set.insert(message.clone());
+                }
+                let resp = ResponseBody::BroadcastOk;
+                return runtime.reply(req, resp).await;
             }
-            let resp = ResponseBody::BroadcastOk;
-            return runtime.reply(req, resp).await;
+            Ok(RequestBody::Read) => {
+                let messages = self.inner.lock().unwrap().set.clone();
+                let resp = ResponseBody::ReadOk {
+                    messages: Vec::from_iter(messages),
+                };
+                return runtime.reply(req, resp).await;
+            }
+            Ok(RequestBody::Topology { .. }) => {
+                return runtime.reply_ok(req).await;
+            }
+            _ => done(runtime, req),
         }
-        if req.get_type() == "read" {
-            let messages = self.inner.lock().unwrap().set.clone();
-            let resp = ResponseBody::ReadOk {
-                messages: Vec::from_iter(messages),
-            };
-            return runtime.reply(req, resp).await;
-        }
-        if req.get_type() == "topology" {
-            return runtime.reply_ok(req).await;
-        }
-
-        done(runtime, req)
     }
+}
+
+#[derive(Deserialize)]
+#[serde(tag = "type", rename_all = "snake_case")]
+enum RequestBody {
+    Broadcast {
+        message: u64,
+    },
+    Read,
+    Topology {
+        topology: std::collections::HashMap<String, Vec<String>>,
+    },
 }
 
 #[derive(Serialize)]
