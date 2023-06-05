@@ -20,6 +20,7 @@ async fn try_main() -> Result<()> {
 #[derive(Clone, Default)]
 struct Handler {
     set: Arc<Mutex<std::collections::HashSet<u64>>>,
+    neighbours: Arc<Mutex<std::collections::HashSet<String>>>,
 }
 
 #[async_trait]
@@ -40,16 +41,18 @@ impl Node for Handler {
             Ok(RequestBody::Topology { .. }) => {
                 return runtime.reply_ok(req).await;
             }
-            Ok(RequestBody::Init { .. }) => {
+            Ok(RequestBody::Init { node_id, node_ids }) => {
                 // spawn into tokio (instead of runtime) to not to wait
                 // until it is completed, as it will never be.
+                info!("{:?}", node_id);
+                self.neighbours.lock().unwrap().extend(pick_neighbours(node_id, node_ids));
                 let (r0, h0) = (runtime.clone(), self.clone());
                 tokio::spawn(async move {
                     loop {
-                        tokio::time::sleep(Duration::from_millis(500)).await;
+                        tokio::time::sleep(Duration::from_millis(300)).await;
                         info!("emit replication signal");
                         let s = h0.set.lock().unwrap();
-                        for n in r0.neighbours() {
+                        for n in h0.neighbours.lock().unwrap().iter() {
                             let msg = RequestBody::Gossip {
                                 messages: to_seq(&s),
                             };
@@ -66,6 +69,47 @@ impl Node for Handler {
             _ => done(runtime, req),
         }
     }
+}
+
+fn pick_neighbours(node_id: String, node_ids: Vec<String>) -> Vec<String> {
+    let neighbourhood_size = 5;
+    let node_no: usize = node_id[1..].parse().expect("Error parsing node number");
+
+    // node is the leader if it's the first in the chunk
+    let is_leader = node_no % neighbourhood_size == 0;
+
+    let mut node_ids: Vec<String> = node_ids;
+    node_ids.sort_by(|a, b| {
+        a[1..]
+            .parse::<usize>()
+            .unwrap()
+            .cmp(&b[1..].parse::<usize>().unwrap())
+    });
+
+    let neighbourhood = node_ids
+        .chunks(neighbourhood_size)
+        .nth(node_no / neighbourhood_size)
+        .unwrap()
+        .to_vec();
+
+    let neighbours: Vec<String> = if is_leader {
+        // exclude ourselves. Leader is always first in the chunk
+        let mut neighbours: Vec<String> = neighbourhood[1..].to_vec();
+        // Add other leaders: first of every other chunk
+        neighbours.extend(
+            node_ids
+                .chunks(neighbourhood_size)
+                .enumerate()
+                .filter(|(i, _)| *i != node_no / neighbourhood_size)
+                .map(|(_, chunk)| chunk.iter().next().unwrap().clone())
+                .collect::<Vec<String>>()
+        );
+        neighbours
+    } else {
+        // the leader is the only neighbour
+        neighbourhood[0..1].to_vec()
+    };
+    neighbours
 }
 
 fn to_seq(s: &MutexGuard<HashSet<u64>>) -> Vec<u64> {
