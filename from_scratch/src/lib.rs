@@ -3,8 +3,13 @@ use std::{
     sync::mpsc::Sender
 };
 
+use env_logger::Builder;
+use env_logger::Env;
+
 use anyhow::{self, Context};
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
+
+use log::{debug, info};
 
 pub type MessageId = usize;
 
@@ -96,10 +101,13 @@ where
     Req: Serialize + DeserializeOwned + Send + 'static,
     Inj: Send + 'static,
 {
+    builder().init();
+    debug!("starting");
     let stdin = std::io::stdin().lock();
     let mut stdin = stdin.lines();
     let mut stdout = std::io::stdout().lock();
 
+    debug!("handling init message");
     let init_msg: Message<InitRequest, InitResponse> = serde_json::from_str(
         &stdin
             .next()
@@ -110,6 +118,7 @@ where
 
     drop(stdin);
 
+    debug!("initialising node");
     let Payload::Request(InitRequest::Init(init)) = init_msg.body.payload else {
         panic!("first message should be init");
     };
@@ -119,6 +128,7 @@ where
     let mut node: N =
         Node::from_init(init_state, init, tx.clone()).context("Couldn't initialise node")?;
 
+    debug!("launching thread to read from stdin");
     std::thread::spawn(move || {
         let stdin = std::io::stdin().lock();
         let stdin = stdin.lines();
@@ -150,6 +160,14 @@ where
         node.step(event, &mut stdout)?
     }
     Ok(())
+}
+
+#[must_use] fn builder() -> Builder {
+    let env = Env::default().filter_or(env_logger::DEFAULT_FILTER_ENV, "info");
+    let mut builder = Builder::from_env(env);
+    builder.format_level(true);
+    builder.format_timestamp_micros();
+    builder
 }
 
 #[cfg(test)]
