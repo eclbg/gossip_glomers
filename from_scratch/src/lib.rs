@@ -1,5 +1,5 @@
 use std::{
-    io::{BufRead, StdoutLock, Write},
+    io::{BufRead, Write},
     sync::mpsc::Sender
 };
 
@@ -9,7 +9,7 @@ use env_logger::Env;
 use anyhow::{self, Context};
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
 
-use log::{debug, info};
+use log::debug;
 
 pub type MessageId = usize;
 

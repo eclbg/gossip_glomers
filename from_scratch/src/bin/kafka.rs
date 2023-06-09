@@ -2,7 +2,7 @@ use std::{collections::HashMap, io::Write};
 
 use gossip_glomers::{Body, Event, Message, MessageId, Node, Payload};
 use serde::{Deserialize, Serialize};
-use log::debug;
+use log::{debug, info};
 
 #[derive(Serialize, Deserialize, Debug)]
 #[serde(rename_all = "snake_case")]
@@ -63,6 +63,7 @@ impl Node<(), KafkaRequest, KafkaResponse> for KafkaNode {
         let Event::Message(msg) = msg else {
             panic!("received unexpected injected variant");
         };
+        info!("Full request: {}", serde_json::to_string(&msg).expect("Couldn't serialize request"));
         let request = msg
             .body
             .payload
@@ -76,38 +77,30 @@ impl Node<(), KafkaRequest, KafkaResponse> for KafkaNode {
                     .or_insert_with(|| Vec::new())
                     .push(msg);
                 debug!("Currently in logs: {:?}", self.logs);
-                let offset = self.logs.get(&key).unwrap().len() - 1;
+                let offset = self.logs.get(&key).unwrap().len();
                 debug!("Will send back offset: {}", offset);
-                Payload::Response(KafkaResponse::SendOk { offset })
+                let resp = Payload::Response(KafkaResponse::SendOk { offset });
+                debug!("Response: {}", serde_json::to_string(&resp).unwrap());
+                resp
             }
             KafkaRequest::Poll { offsets } => {
                 debug!("Received poll message. offsets = {:?}", offsets);
                 let mut msgs: HashMap<String, Vec<[usize; 2]>> = HashMap::new();
                 debug!("Currently in logs: {:?}", self.logs);
-                if offsets.is_empty() {
-                    for (key, messages) in self.logs.iter() {
-                        let offset = 0;
-                        let mut pairs: Vec<[usize; 2]> = Vec::new();
-                        for (i, msg) in messages.iter().enumerate() {
-                            pairs.push([*msg, offset + i]);
+                for (key, offset) in offsets.iter() {
+                    let mut pairs: Vec<[usize; 2]> = Vec::new();
+                    if let Some(msgs2) = self.logs.get(key) {
+                        for (i, &msg) in msgs2.iter().skip(*offset).enumerate() {
+                            pairs.push([offset + i, msg]);
                         }
                         msgs.insert(key.clone(), pairs);
-                    }
-                } else {
-                    for (key, offset) in offsets.iter() {
-                        let mut pairs: Vec<[usize; 2]> = Vec::new();
-                        if let Some(msgs2) = self.logs.get(key) {
-                            for (i, &msg) in msgs2.iter().skip(*offset).enumerate() {
-                                pairs.push([msg, offset + i]);
-                            }
-                            msgs.insert(key.clone(), pairs);
-                        } else {
-                            debug!("Polled for non-existing key {}", key)
-                        }
+                    } else {
+                        debug!("Polled for non-existing key {}", key)
                     }
                 }
-                debug!("Will send back messages: {:?}", msgs);
-                Payload::Response(KafkaResponse::PollOk { msgs })
+                let resp = Payload::Response(KafkaResponse::PollOk { msgs });
+                debug!("Response: {}", serde_json::to_string(&resp).unwrap());
+                resp
             }
             KafkaRequest::CommitOffsets { offsets } => {
                 debug!("Received commit_offsets. Offsets: {:?}", offsets);
@@ -115,7 +108,7 @@ impl Node<(), KafkaRequest, KafkaResponse> for KafkaNode {
                 self.committed_offsets.extend(offsets);
                 debug!("Committed offsets after processing: {:?}", self.committed_offsets);
                 let resp = Payload::Response(KafkaResponse::CommitOffsetsOk);
-                debug!("Response: {:?}", serde_json::to_string(&resp));
+                debug!("Response: {}", serde_json::to_string(&resp).unwrap());
                 resp
             }
             KafkaRequest::ListCommittedOffsets { keys } => {
@@ -128,7 +121,7 @@ impl Node<(), KafkaRequest, KafkaResponse> for KafkaNode {
                     .collect();
                 debug!("Will reply with offsets: {:?}", offsets);
                 let resp = Payload::Response(KafkaResponse::ListCommittedOffsetsOk { offsets });
-                debug!("Response: {:?}", serde_json::to_string(&resp));
+                debug!("Response: {}", serde_json::to_string(&resp).unwrap());
                 resp
             }
         };
@@ -138,11 +131,12 @@ impl Node<(), KafkaRequest, KafkaResponse> for KafkaNode {
             src: self.node_id.clone(),
             dest: msg.src,
             body: Body {
-                msg_id: None,
+                msg_id: Some(self.msg_id),
                 in_reply_to: msg.body.msg_id,
                 payload: reply_payload,
             },
         };
+        info!("Full response: {}", serde_json::to_string(&reply).expect("Couldn't serialize response"));
         serde_json::to_writer(&mut *output, &reply)?;
         output.write_all(b"\n")?;
         Ok(())

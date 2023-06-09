@@ -28,9 +28,11 @@ grow-only-counter:
 # kafka-style-log:
 # 	maelstrom/maelstrom test -w kafka --bin with_lib/target/debug/kafka --node-count 1 --concurrency 2n --time-limit 20 --rate 1000
 	
+# For testing
 kafka-style-log:
 	RUST_LOG=debug maelstrom/maelstrom test -w kafka --bin with_lib/target/debug/kafka --node-count 1 --concurrency 2n --time-limit 5 --rate 50
 
 kafka-style-log-single-threaded:
-	RUST_LOG=debug maelstrom/maelstrom test -w kafka --bin from_scratch/target/debug/kafka --node-count 1 --concurrency 2n --time-limit 5 --rate 50
+	RUST_LOG=debug maelstrom/maelstrom test -w kafka --bin from_scratch/target/debug/kafka --node-count 1 --time-limit 5 --rate 50
+	# RUST_LOG=debug maelstrom/maelstrom test -w kafka --bin from_scratch/target/debug/kafka --node-count 1 --concurrency 2n --time-limit 5 --rate 500
 
