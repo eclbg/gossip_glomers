@@ -7,6 +7,8 @@ use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::sync::Mutex;
 
+const NUM_POLL_RESULTS: usize = 5;
+
 pub(crate) fn main() -> Result<()> {
     Runtime::init(try_main())
 }
@@ -18,7 +20,7 @@ struct Handler {
 
 #[derive(Default)]
 struct State {
-    logs: HashMap<String, Vec<usize>>,
+    logs: HashMap<String, Vec<(usize, usize)>>,
     committed_offsets: HashMap<String, usize>,
 }
 
@@ -35,33 +37,39 @@ impl Node for Handler {
         match body {
             RequestBody::Send { key, msg } => {
                 let mut s = self.state.lock().await;
-                s.logs
-                    .entry(key.clone())
-                    .or_insert_with(|| Vec::new())
-                    .push(msg);
-                let offset = s.logs.get(&key).unwrap().len() - 1;
+                // create entry if not exists
+                let msgs = s.logs.entry(key.clone()).or_insert_with(|| Vec::new());
+                // len + 1 as we still haven't pushed the new message
+                let offset = msgs.len() + 1;
+                debug!("Will send back offset: {}", offset);
+                msgs.push((offset, msg));
+                debug!("Currently in logs: {:?}", s.logs);
                 let resp = ResponseBody::SendOk { offset };
+                debug!("Response: {}", serde_json::to_string(&resp).unwrap());
                 return runtime.reply(req, resp).await;
+
             }
             RequestBody::Poll { offsets } => {
-                let mut msgs: HashMap<String, Vec<[usize; 2]>> = HashMap::new();
+                let mut resp_msgs: HashMap<String, Vec<(usize, usize)>> = HashMap::new();
                 let s = self.state.lock().await;
                 debug!("Currently in logs: {:?}", s.logs);
                 for (key, offset) in offsets.iter() {
-                    let s = self.state.lock().await;
-                    let mut pairs: Vec<[usize; 2]> = Vec::new();
-                    if let Some(msgs2) = s.logs.get(key) {
-                        info!("{}", offset);
-                        for (i, &msg) in msgs2.iter().skip(*offset).enumerate() {
-                            pairs.push([offset + i, msg]);
+                    if let Some(msgs) = s.logs.get(key) {
+                        if let Some((first_to_return_idx, _)) = msgs
+                            .iter()
+                            .enumerate()
+                            .filter(|(i, _)| i >= offset)
+                            .next()
+                        {
+                            resp_msgs.insert(key.clone(), msgs.iter().skip(first_to_return_idx).take(NUM_POLL_RESULTS).copied().collect());
+                        } else {
+                            debug!("No messages on or after offset")
                         }
-                        msgs.insert(key.clone(), pairs);
                     } else {
-                        eprintln!("Polled for non-existing key {}", key)
+                        debug!("Polled for non-existing key {}", key)
                     }
                 }
-                let resp = ResponseBody::PollOk { msgs };
-                debug!("Response: {}", serde_json::to_string(&resp).unwrap());
+                let resp = ResponseBody::PollOk { msgs: resp_msgs };
                 return runtime.reply(req, resp).await;
             }
             RequestBody::CommitOffsets { offsets } => {
@@ -116,7 +124,7 @@ enum ResponseBody {
         offset: usize,
     },
     PollOk {
-        msgs: HashMap<String, Vec<[usize; 2]>>,
+        msgs: HashMap<String, Vec<(usize, usize)>>,
     },
     // CommitOffsetsOk
     ListCommittedOffsetsOk {
