@@ -4,6 +4,8 @@ use gossip_glomers::{Body, Event, Message, MessageId, Node, Payload};
 use log::{debug, info};
 use serde::{Deserialize, Serialize};
 
+const NUM_POLL_RESULTS: usize = 5;
+
 #[derive(Serialize, Deserialize, Debug)]
 #[serde(rename_all = "snake_case")]
 #[serde(tag = "type")]
@@ -98,9 +100,9 @@ impl Node<(), KafkaRequest, KafkaResponse> for KafkaNode {
                             .filter(|(i, _)| i >= offset)
                             .next()
                         {
-                            resp_msgs.insert(key.clone(), msgs.iter().skip(first_to_return_idx).copied().collect());
+                            resp_msgs.insert(key.clone(), msgs.iter().skip(first_to_return_idx).take(NUM_POLL_RESULTS).copied().collect());
                         } else {
-                            debug!("No messages after offset")
+                            debug!("No messages on or after offset")
                         }
                     } else {
                         debug!("Polled for non-existing key {}", key)
