@@ -4,8 +4,6 @@ use gossip_glomers::{Body, Event, Message, MessageId, Node, Payload};
 use log::{debug, info};
 use serde::{Deserialize, Serialize};
 
-const NUM_POLL_RESULTS: usize = 5;
-
 #[derive(Serialize, Deserialize, Debug)]
 #[serde(rename_all = "snake_case")]
 #[serde(tag = "type")]
@@ -97,10 +95,13 @@ impl Node<(), KafkaRequest, KafkaResponse> for KafkaNode {
                         if let Some((first_to_return_idx, _)) = msgs
                             .iter()
                             .enumerate()
-                            .filter(|(i, _)| i >= offset)
+                            .filter(|(_, (o, _))| o >= offset)
                             .next()
                         {
-                            resp_msgs.insert(key.clone(), msgs.iter().skip(first_to_return_idx).take(NUM_POLL_RESULTS).copied().collect());
+                            resp_msgs.insert(
+                                key.clone(),
+                                msgs.iter().skip(first_to_return_idx).copied().collect(),
+                            );
                         } else {
                             debug!("No messages on or after offset")
                         }
