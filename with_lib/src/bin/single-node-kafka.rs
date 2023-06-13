@@ -1,13 +1,11 @@
 use async_trait::async_trait;
-use log::{debug, info};
+use log::debug;
 use maelstrom::protocol::Message;
 use maelstrom::{Node, Result, Runtime};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::sync::Mutex;
-
-const NUM_POLL_RESULTS: usize = 5;
 
 pub(crate) fn main() -> Result<()> {
     Runtime::init(try_main())
