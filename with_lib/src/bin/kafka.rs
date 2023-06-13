@@ -1,5 +1,5 @@
 use async_trait::async_trait;
-use log::{info, debug};
+use log::{debug, info};
 use maelstrom::protocol::Message;
 use maelstrom::{Node, Result, Runtime};
 use serde::{Deserialize, Serialize};
@@ -47,7 +47,6 @@ impl Node for Handler {
                 let resp = ResponseBody::SendOk { offset };
                 debug!("Response: {}", serde_json::to_string(&resp).unwrap());
                 return runtime.reply(req, resp).await;
-
             }
             RequestBody::Poll { offsets } => {
                 let mut resp_msgs: HashMap<String, Vec<(usize, usize)>> = HashMap::new();
@@ -58,10 +57,13 @@ impl Node for Handler {
                         if let Some((first_to_return_idx, _)) = msgs
                             .iter()
                             .enumerate()
-                            .filter(|(i, _)| i >= offset)
+                            .filter(|(_, (o, _))| o >= offset)
                             .next()
                         {
-                            resp_msgs.insert(key.clone(), msgs.iter().skip(first_to_return_idx).take(NUM_POLL_RESULTS).copied().collect());
+                            resp_msgs.insert(
+                                key.clone(),
+                                msgs.iter().skip(first_to_return_idx).copied().collect(),
+                            );
                         } else {
                             debug!("No messages on or after offset")
                         }
@@ -83,14 +85,12 @@ impl Node for Handler {
                     .committed_offsets
                     .iter()
                     .filter(|(k, _)| keys.contains(k))
-                    .map(|(k,v)| (k.clone(), *v))
+                    .map(|(k, v)| (k.clone(), *v))
                     .collect();
                 let resp = ResponseBody::ListCommittedOffsetsOk { offsets };
                 return runtime.reply(req, resp).await;
             }
-            RequestBody::Init { .. } => {
-                Ok(())
-            }
+            RequestBody::Init { .. } => Ok(()),
         }
     }
 }
