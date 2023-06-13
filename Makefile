@@ -25,14 +25,8 @@ broadcast-latency-partitioned:
 grow-only-counter:
 	maelstrom/maelstrom test -w g-counter --bin with_lib/target/debug/g-counter --node-count 3 --rate 100 --time-limit 20 --nemesis partition
 	
-# kafka-style-log:
-# 	maelstrom/maelstrom test -w kafka --bin with_lib/target/debug/kafka --node-count 1 --concurrency 2n --time-limit 20 --rate 1000
-	
-# For testing
 kafka-style-log:
-	RUST_LOG=debug maelstrom/maelstrom test -w kafka --bin with_lib/target/debug/kafka --node-count 1 --concurrency 2n --time-limit 5 --rate 50
+	maelstrom/maelstrom test -w kafka --bin with_lib/target/debug/kafka --node-count 1 --concurrency 2n --time-limit 20 --rate 1000
 
 kafka-style-log-single-threaded:
-	# RUST_LOG=debug maelstrom/maelstrom test -w kafka --bin from_scratch/target/debug/kafka --node-count 1 --time-limit 5 --rate 50
-	RUST_LOG=debug maelstrom/maelstrom test -w kafka --bin from_scratch/target/debug/kafka --node-count 1 --concurrency 2n --time-limit 5 --rate 500
-
+	RUST_LOG=debug maelstrom/maelstrom test -w kafka --bin from_scratch/target/debug/kafka --node-count 1 --concurrency 2n --time-limit 20 --rate 1000
