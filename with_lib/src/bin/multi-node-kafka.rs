@@ -10,6 +10,9 @@ use tokio::sync::Mutex;
 use tokio_context::context::Context;
 
 type Pair = (usize, usize);
+type CommittedOffsets = HashMap<String, usize>;
+
+static COMMITTED_OFFSETS_KEY: &str = "committed_offsets";
 
 pub(crate) fn main() -> Result<()> {
     Runtime::init(try_main())
@@ -21,17 +24,15 @@ struct Handler {
 }
 
 async fn try_main() -> Result<()> {
-    // The challenge assignment suggests using the lin-kv service provided by
-    // maelstrom. We do need linearizability but only between messages in the same
-    // partition (key).
-    // It's important to understand the scope of the linearizability guarantee of
-    // the lin-kv service. That's not specified in the maelstrom docs so I guess we
-    // can assume it's total linearizability?
-    // Could we use lin-kv just for the offsets and store the messages locally?
-    // And maybe gossip them between nodes? I don't think that would be correct as
-    // a client might observe older messages for the first time in more recent polls.
-    // Could we do Read + CaS operations on whole lists? This would be correct but
-    // feels very brute force. Let's start by trying this just to get the ball rolling.
+    // The challenge assignment suggests using the lin-kv service provided by maelstrom. We do need
+    // linearizability but only between messages in the same partition (key). It's important to
+    // understand the scope of the linearizability guarantee of the lin-kv service. That's not
+    // specified in the maelstrom docs so I guess we can assume it's total linearizability? Could we
+    // use lin-kv just for the offsets and store the messages locally? And maybe gossip them between
+    // nodes? I don't think that would be correct as a client might observe older messages for the
+    // first time in more recent polls. Could we do Read + CaS operations on whole lists? This would
+    // be correct but feels very brute force. Let's start by trying this just to get the ball
+    // rolling.
     let runtime = Runtime::new();
     let handler = Arc::new(Handler {
         s: lin_kv(runtime.clone()),
@@ -52,8 +53,9 @@ impl Node for Handler {
                 let read_res = self.s.get::<Vec<Pair>>(Context::new().0, key.clone()).await;
                 let mut msgs = if read_res.is_err() {
                     // If CaS succeeds the next get will surely succeed. If CaS fails it's because
-                    // someone else already put something in key, therefore the next read will succeed.
-                    // This means we only need to attempt the CaS once and we can ignore the result.
+                    // someone else already put something in key, therefore the next read will
+                    // succeed. This means we only need to attempt the CaS once and we can ignore
+                    // the result.
                     let _ = self
                         .s
                         .cas(
@@ -64,7 +66,8 @@ impl Node for Handler {
                             true,
                         )
                         .await;
-                    let msgs = self.s
+                    let msgs = self
+                        .s
                         .get::<Vec<Pair>>(Context::new().0, key.clone())
                         .await
                         .unwrap();
@@ -82,7 +85,8 @@ impl Node for Handler {
                 };
                 msgs.extend([(offset, msg)]);
                 // Now perform the CaS with the new msgs, if it fails we need to retry a few ops
-                let mut cas_res = self.s
+                let mut cas_res = self
+                    .s
                     .cas(
                         Context::new().0,
                         key.clone(),
@@ -92,12 +96,13 @@ impl Node for Handler {
                     )
                     .await;
                 while cas_res.is_err() {
-                    let mut msgs = self.s
+                    let mut msgs = self
+                        .s
                         .get::<Vec<Pair>>(Context::new().0, key.clone())
                         .await
                         .unwrap();
                     // At this point msgs could be an empty vec
-                    debug!("{:?}", msgs); // To check that the pattern matching is correct
+                    debug!("msgs = {:?}", msgs); // To check that the pattern matching is correct
                     let offset = if let Some((last_offset, _)) = msgs.last() {
                         last_offset + 1
                     } else {
@@ -105,8 +110,9 @@ impl Node for Handler {
                         1
                     };
                     msgs.extend([(offset, msg)]);
-                    // Now perform the CaS with the new msgs, if it fails we need to retry a few ops
-                    cas_res = self.s
+                    // Try CaS again, now with the new msgs
+                    cas_res = self
+                        .s
                         .cas(
                             Context::new().0,
                             key.clone(),
@@ -116,19 +122,69 @@ impl Node for Handler {
                         )
                         .await;
                 }
-                todo!()
-                //     Ok(msgs) => todo!(),
-                //     Err(_) => todo!(),
-                // }
+                let resp = ResponseBody::SendOk { offset };
+                return runtime.reply(req, resp).await;
             }
             RequestBody::Poll { offsets } => {
-                todo!()
+                // This one should be easier than Send. Just get the messages present for each key,
+                // filter them, and return them. It will inevitably trigger multiple requests to the
+                // lin-kv service, but that's fine
+                let mut resp_msgs: HashMap<String, Vec<Pair>> = HashMap::new();
+                for (key, offset) in offsets.iter() {
+                    if let Ok(msgs) = self
+                        .s
+                        .get::<Vec<Pair>>(Context::new().0, key.to_string())
+                        .await
+                    {
+                        // Same logic as in single-node-kafka from here onwards
+                        if let Some((first_to_return_idx, _)) = msgs
+                            .iter()
+                            .enumerate()
+                            .filter(|(_, (o, _))| o >= offset)
+                            .next()
+                        {
+                            resp_msgs.insert(
+                                key.clone(),
+                                msgs.iter().skip(first_to_return_idx).copied().collect(),
+                            );
+                        } else {
+                            debug!("No messages on or after offset")
+                        }
+                    } else {
+                        debug!("Polled for non-existing key {}", key)
+                    }
+                }
+                let resp = ResponseBody::PollOk { msgs: resp_msgs };
+                return runtime.reply(req, resp).await;
             }
             RequestBody::CommitOffsets { offsets } => {
-                todo!()
+                // Can we just blindly override the offsets that are currently stored in the server?
+                // I think so. Let's go with that.
+                self.s
+                    .put(Context::new().0, COMMITTED_OFFSETS_KEY.to_string(), offsets)
+                    .await
+                    .expect("Errors writing committed offsets to lin-kv");
+                return runtime.reply_ok(req).await;
             }
             RequestBody::ListCommittedOffsets { keys } => {
-                todo!()
+                // If there's no committed offsets just return empty
+                let offsets = if let Ok(committed_offsets) = self
+                    .s
+                    .get::<CommittedOffsets>(Context::new().0, COMMITTED_OFFSETS_KEY.to_string())
+                    .await
+                {
+                    // Same logic as in single-node solution
+                    committed_offsets
+                        .iter()
+                        .filter(|(k, _)| keys.contains(k))
+                        .map(|(k, v)| (k.clone(), *v))
+                        .collect()
+                } else {
+                    debug!("No committed offsets to return");
+                    HashMap::new()
+                };
+                let resp = ResponseBody::ListCommittedOffsetsOk { offsets };
+                return runtime.reply(req, resp).await;
             }
             RequestBody::Init { .. } => Ok(()),
         }
