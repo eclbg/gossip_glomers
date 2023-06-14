@@ -5,8 +5,7 @@ use maelstrom::protocol::Message;
 use maelstrom::{Node, Result, Runtime};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
-use std::sync::Arc;
-use tokio::sync::Mutex;
+use std::sync::{Arc, Mutex};
 use tokio_context::context::Context;
 
 type Pair = (usize, usize);
@@ -21,6 +20,16 @@ pub(crate) fn main() -> Result<()> {
 #[derive(Clone)]
 struct Handler {
     s: Storage,
+    op_id: Arc<Mutex<usize>>
+}
+
+impl Handler {
+    fn get_op_id(&self) -> usize {
+        let mut op_id = self.op_id.lock().unwrap();
+        let curr_op_id = op_id.clone();
+        *op_id += 1;
+        return curr_op_id
+    }
 }
 
 async fn try_main() -> Result<()> {
@@ -36,6 +45,7 @@ async fn try_main() -> Result<()> {
     let runtime = Runtime::new();
     let handler = Arc::new(Handler {
         s: lin_kv(runtime.clone()),
+        op_id: Arc::new(Mutex::new(0))
     });
     runtime.with_handler(handler).run().await
 }
@@ -46,6 +56,8 @@ impl Node for Handler {
         let body: RequestBody = req.body.as_obj().expect("Error deserializing message body");
         match body {
             RequestBody::Send { key, msg } => {
+                let op_id = self.get_op_id();
+                debug!("op_id: {:?} Start", op_id);
                 // Read from lin-kv and, if the key is empty,
                 // try to write with a CaS operation until it succeeds
                 //
@@ -56,6 +68,7 @@ impl Node for Handler {
                     // someone else already put something in key, therefore the next read will
                     // succeed. This means we only need to attempt the CaS once and we can ignore
                     // the result.
+                    debug!("op_id: {:?} Getting here should mean that there's no messges in key: {}", op_id, key);
                     let _ = self
                         .s
                         .cas(
@@ -71,12 +84,13 @@ impl Node for Handler {
                         .get::<Vec<Pair>>(Context::new().0, key.clone())
                         .await
                         .unwrap();
+                    debug!("op_id: {:?} Key: {} should now be inited", op_id, key);
                     msgs
                 } else {
                     read_res.unwrap()
                 };
                 // At this point msgs could be an empty vec
-                debug!("{:?}", msgs); // To check that the pattern matching is correct
+                debug!("op_id: {:?} msgs: {:?}", op_id, msgs); // To check that the pattern matching is correct
                 let offset = if let Some((last_offset, _)) = msgs.last() {
                     last_offset + 1
                 } else {
@@ -85,6 +99,7 @@ impl Node for Handler {
                 };
                 msgs.extend([(offset, msg)]);
                 // Now perform the CaS with the new msgs, if it fails we need to retry a few ops
+                debug!("op_id: {:?} Trying to insert msgs: {:?}", op_id, msgs);
                 let mut cas_res = self
                     .s
                     .cas(
@@ -96,13 +111,14 @@ impl Node for Handler {
                     )
                     .await;
                 while cas_res.is_err() {
+                    debug!("op_id: {:?} Insert failed. Someone else must have written to key: {}", op_id, key);
                     let mut msgs = self
                         .s
                         .get::<Vec<Pair>>(Context::new().0, key.clone())
                         .await
                         .unwrap();
                     // At this point msgs could be an empty vec
-                    debug!("msgs = {:?}", msgs); // To check that the pattern matching is correct
+                    debug!("op_id: {:?} msgs: {:?}", op_id, msgs);
                     let offset = if let Some((last_offset, _)) = msgs.last() {
                         last_offset + 1
                     } else {
@@ -111,6 +127,7 @@ impl Node for Handler {
                     };
                     msgs.extend([(offset, msg)]);
                     // Try CaS again, now with the new msgs
+                    debug!("op_id: {:?} Trying to insert msgs: {:?}", op_id, msgs);
                     cas_res = self
                         .s
                         .cas(
@@ -123,9 +140,12 @@ impl Node for Handler {
                         .await;
                 }
                 let resp = ResponseBody::SendOk { offset };
+                debug!("op_id: {:?} Done", op_id);
                 return runtime.reply(req, resp).await;
             }
             RequestBody::Poll { offsets } => {
+                let op_id = self.get_op_id();
+                debug!("op_id: {:?} Start", op_id);
                 // This one should be easier than Send. Just get the messages present for each key,
                 // filter them, and return them. It will inevitably trigger multiple requests to the
                 // lin-kv service, but that's fine
@@ -148,25 +168,31 @@ impl Node for Handler {
                                 msgs.iter().skip(first_to_return_idx).copied().collect(),
                             );
                         } else {
-                            debug!("No messages on or after offset")
+                            debug!("op_id: {:?} No messages on or after offset", op_id)
                         }
                     } else {
-                        debug!("Polled for non-existing key {}", key)
+                        debug!("op_id: {:?} Polled for non-existing key {}", op_id, key)
                     }
                 }
                 let resp = ResponseBody::PollOk { msgs: resp_msgs };
+                debug!("op_id: {:?} Done", op_id);
                 return runtime.reply(req, resp).await;
             }
             RequestBody::CommitOffsets { offsets } => {
+                let op_id = self.get_op_id();
+                debug!("op_id: {:?} Start", op_id);
                 // Can we just blindly override the offsets that are currently stored in the server?
                 // I think so. Let's go with that.
                 self.s
                     .put(Context::new().0, COMMITTED_OFFSETS_KEY.to_string(), offsets)
                     .await
                     .expect("Errors writing committed offsets to lin-kv");
+                debug!("op_id: {:?} Done", op_id);
                 return runtime.reply_ok(req).await;
             }
             RequestBody::ListCommittedOffsets { keys } => {
+                let op_id = self.get_op_id();
+                debug!("op_id: {:?} Start", op_id);
                 // If there's no committed offsets just return empty
                 let offsets = if let Ok(committed_offsets) = self
                     .s
@@ -180,10 +206,11 @@ impl Node for Handler {
                         .map(|(k, v)| (k.clone(), *v))
                         .collect()
                 } else {
-                    debug!("No committed offsets to return");
+                    debug!("op_id: {:?} No committed offsets to return", op_id);
                     HashMap::new()
                 };
                 let resp = ResponseBody::ListCommittedOffsetsOk { offsets };
+                debug!("op_id: {:?} Done", op_id);
                 return runtime.reply(req, resp).await;
             }
             RequestBody::Init { .. } => Ok(()),
