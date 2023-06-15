@@ -1,6 +1,6 @@
 use async_trait::async_trait;
 use log::debug;
-use maelstrom::kv::{lin_kv, Storage, KV};
+use maelstrom::kv::{lin_kv, seq_kv, Storage, KV};
 use maelstrom::protocol::Message;
 use maelstrom::{Node, Result, Runtime};
 use serde::{Deserialize, Serialize};
@@ -19,7 +19,8 @@ pub(crate) fn main() -> Result<()> {
 
 #[derive(Clone)]
 struct Handler {
-    s: Storage,
+    lin_kv_store: Storage,
+    seq_kv_store: Storage,
     op_id: Arc<Mutex<usize>>
 }
 
@@ -44,7 +45,8 @@ async fn try_main() -> Result<()> {
     // rolling.
     let runtime = Runtime::new();
     let handler = Arc::new(Handler {
-        s: lin_kv(runtime.clone()),
+        lin_kv_store: lin_kv(runtime.clone()),
+        seq_kv_store: seq_kv(runtime.clone()),
         op_id: Arc::new(Mutex::new(0))
     });
     runtime.with_handler(handler).run().await
@@ -62,7 +64,7 @@ impl Node for Handler {
                 // try to write with a CaS operation until it succeeds
                 //
                 // This could be Err if the key doesn't exist
-                let read_res = self.s.get::<Vec<Pair>>(Context::new().0, key.clone()).await;
+                let read_res = self.lin_kv_store.get::<Vec<Pair>>(Context::new().0, key.clone()).await;
                 let mut msgs;
                 if read_res.is_err() {
                     // If CaS succeeds the next get will surely succeed. If CaS fails it's because
@@ -71,7 +73,7 @@ impl Node for Handler {
                     // the result.
                     debug!("op_id: {:?} Getting here should mean that there's no messges in key: {}", op_id, key);
                     let _ = self
-                        .s
+                        .lin_kv_store
                         .cas(
                             Context::new().0,
                             key.clone(),
@@ -81,7 +83,7 @@ impl Node for Handler {
                         )
                         .await;
                     msgs = self
-                        .s
+                        .lin_kv_store
                         .get::<Vec<Pair>>(Context::new().0, key.clone())
                         .await
                         .unwrap();
@@ -101,7 +103,7 @@ impl Node for Handler {
                 // Now perform the CaS with the new msgs, if it fails we need to retry a few ops
                 debug!("op_id: {:?} Trying to insert msgs: {:?}", op_id, msgs);
                 let mut cas_res = self
-                    .s
+                    .lin_kv_store
                     .cas(
                         Context::new().0,
                         key.clone(),
@@ -113,7 +115,7 @@ impl Node for Handler {
                 while cas_res.is_err() {
                     debug!("op_id: {:?} Insert failed. Someone else must have written to key: {}", op_id, key);
                     msgs = self
-                        .s
+                        .lin_kv_store
                         .get::<Vec<Pair>>(Context::new().0, key.clone())
                         .await
                         .unwrap();
@@ -129,7 +131,7 @@ impl Node for Handler {
                     // Try CaS again, now with the new msgs
                     debug!("op_id: {:?} Trying to insert msgs: {:?}", op_id, msgs);
                     cas_res = self
-                        .s
+                        .lin_kv_store
                         .cas(
                             Context::new().0,
                             key.clone(),
@@ -152,7 +154,7 @@ impl Node for Handler {
                 let mut resp_msgs: HashMap<String, Vec<Pair>> = HashMap::new();
                 for (key, offset) in offsets.iter() {
                     if let Ok(msgs) = self
-                        .s
+                        .lin_kv_store
                         .get::<Vec<Pair>>(Context::new().0, key.to_string())
                         .await
                     {
@@ -183,7 +185,7 @@ impl Node for Handler {
                 debug!("op_id: {:?} Start", op_id);
                 // Can we just blindly override the offsets that are currently stored in the server?
                 // I think so. Let's go with that.
-                self.s
+                self.seq_kv_store
                     .put(Context::new().0, COMMITTED_OFFSETS_KEY.to_string(), offsets)
                     .await
                     .expect("Errors writing committed offsets to lin-kv");
@@ -195,7 +197,7 @@ impl Node for Handler {
                 debug!("op_id: {:?} Start", op_id);
                 // If there's no committed offsets just return empty
                 let offsets = if let Ok(committed_offsets) = self
-                    .s
+                    .seq_kv_store
                     .get::<CommittedOffsets>(Context::new().0, COMMITTED_OFFSETS_KEY.to_string())
                     .await
                 {
