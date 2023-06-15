@@ -63,7 +63,8 @@ impl Node for Handler {
                 //
                 // This could be Err if the key doesn't exist
                 let read_res = self.s.get::<Vec<Pair>>(Context::new().0, key.clone()).await;
-                let mut msgs = if read_res.is_err() {
+                let mut msgs;
+                if read_res.is_err() {
                     // If CaS succeeds the next get will surely succeed. If CaS fails it's because
                     // someone else already put something in key, therefore the next read will
                     // succeed. This means we only need to attempt the CaS once and we can ignore
@@ -79,19 +80,18 @@ impl Node for Handler {
                             true,
                         )
                         .await;
-                    let msgs = self
+                    msgs = self
                         .s
                         .get::<Vec<Pair>>(Context::new().0, key.clone())
                         .await
                         .unwrap();
                     debug!("op_id: {:?} Key: {} should now be inited", op_id, key);
-                    msgs
                 } else {
-                    read_res.unwrap()
+                    msgs = read_res.unwrap()
                 };
                 // At this point msgs could be an empty vec
                 debug!("op_id: {:?} msgs: {:?}", op_id, msgs); // To check that the pattern matching is correct
-                let offset = if let Some((last_offset, _)) = msgs.last() {
+                let mut offset = if let Some((last_offset, _)) = msgs.last() {
                     last_offset + 1
                 } else {
                     // If msgs is an empty vec, we need to insert offset 1
@@ -112,14 +112,14 @@ impl Node for Handler {
                     .await;
                 while cas_res.is_err() {
                     debug!("op_id: {:?} Insert failed. Someone else must have written to key: {}", op_id, key);
-                    let mut msgs = self
+                    msgs = self
                         .s
                         .get::<Vec<Pair>>(Context::new().0, key.clone())
                         .await
                         .unwrap();
                     // At this point msgs could be an empty vec
                     debug!("op_id: {:?} msgs: {:?}", op_id, msgs);
-                    let offset = if let Some((last_offset, _)) = msgs.last() {
+                    offset = if let Some((last_offset, _)) = msgs.last() {
                         last_offset + 1
                     } else {
                         // If msgs is an empty vec, we need to insert offset 1
