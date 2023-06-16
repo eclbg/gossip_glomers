@@ -37,3 +37,6 @@ kafka-style-log:
 
 kafka-style-log-single-node-single-threaded:
 	RUST_LOG=debug maelstrom/maelstrom test -w kafka --bin from_scratch/target/debug/kafka --node-count 1 --concurrency 2n --time-limit 20 --rate 1000
+
+transactions-single-node:
+	maelstrom/maelstrom test -w txn-rw-register --bin with_lib/bin/txn --node-count 1 --time-limit 20 --rate 1000 --concurrency 2n --consistency-models read-uncommitted --availability total
