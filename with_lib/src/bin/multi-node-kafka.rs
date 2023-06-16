@@ -21,6 +21,7 @@ pub(crate) fn main() -> Result<()> {
 struct Handler {
     lin_kv_store: Storage,
     seq_kv_store: Storage,
+    // op_id is purely for making logs more meaningful
     op_id: Arc<Mutex<usize>>
 }
 
