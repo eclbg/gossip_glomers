@@ -1,4 +1,7 @@
-use std::sync::Arc;
+use std::{
+    collections::HashMap,
+    sync::{Arc, Mutex},
+};
 
 use async_trait::async_trait;
 use log::debug;
@@ -10,7 +13,9 @@ pub(crate) fn main() -> Result<()> {
 }
 
 #[derive(Clone, Default)]
-struct Handler {}
+struct Handler {
+    storage: Arc<Mutex<HashMap<usize, usize>>>,
+}
 
 async fn try_main() -> Result<()> {
     let runtime = Runtime::new();
@@ -24,8 +29,20 @@ impl Node for Handler {
         let body: RequestBody = req.body.as_obj().expect("Error deserializing message body");
         match body {
             RequestBody::Transaction { txn } => {
-                let ops: Vec<Operation> =
+                let mut ops: Vec<Operation> =
                     txn.into_iter().map(|so| so.try_into().unwrap()).collect();
+                debug!("{:?}", ops);
+                for op in ops.iter_mut() {
+                    match op {
+                        Operation::Read { key, value } => {
+                            *value = self.storage.lock().unwrap().get(&key).copied();
+                        }
+                        Operation::Write { key, value } => {
+                            let mut s = self.storage.lock().unwrap();
+                            s.entry(key.clone()).or_insert_with(|| value.clone());
+                        }
+                    }
+                }
                 debug!("{:?}", ops);
                 return runtime
                     .reply(req.clone(), ResponseBody::TransactionOk { txn: ops })
@@ -57,7 +74,7 @@ enum ResponseBody {
 #[derive(Debug, PartialEq)]
 enum Operation {
     Read { key: usize, value: Option<usize> },
-    Write { from_key: usize, to_key: usize },
+    Write { key: usize, value: usize },
 }
 
 impl Serialize for Operation {
@@ -72,7 +89,10 @@ impl Serialize for Operation {
                 seq.serialize_element(key)?;
                 seq.serialize_element(value)?;
             }
-            Operation::Write { from_key, to_key } => {
+            Operation::Write {
+                key: from_key,
+                value: to_key,
+            } => {
                 seq.serialize_element("w")?;
                 seq.serialize_element(from_key)?;
                 seq.serialize_element(to_key)?;
@@ -94,8 +114,8 @@ impl TryInto<Operation> for SerdeOperation {
                 value: self.2,
             }),
             'w' => Ok(Operation::Write {
-                from_key: self.1,
-                to_key: self.2.expect("must be a value"),
+                key: self.1,
+                value: self.2.expect("must be a value"),
             }),
             _ => Err(()),
         }
@@ -103,48 +123,6 @@ impl TryInto<Operation> for SerdeOperation {
 
     type Error = ();
 }
-
-// impl<'de> Deserialize<'de> for Operation {
-//     fn deserialize<D>(deserializer: D) -> std::result::Result<Self, D::Error>
-//     where
-//         D: serde::Deserializer<'de>,
-//     {
-//         struct OperationVisitor;
-//
-//         impl<'de> Visitor<'de> for OperationVisitor {
-//             type Value = Operation;
-//
-//             fn expecting(&self, formatter: &mut std::fmt::Formatter) -> std::fmt::Result {
-//                 formatter.write_str("enum Operation")
-//             }
-//
-//             fn visit_seq<A>(self, mut seq: A) -> std::result::Result<Self::Value, A::Error>
-//             where
-//                 A: serde::de::SeqAccess<'de>,
-//             {
-//                 let op_type = seq.next_element()?.ok_or_else(|| de::Error::invalid_length(0, &"array of size 3"))?;
-//                 match op_type {
-//                     "r" => {
-//                         let key = seq.next_element()?.ok_or_else(|| de::Error::invalid_length(1, &"array of size 3"));
-//                         let value = seq.next_element()?.ok_or_else(|| de::Error::invalid_length(2, &"array of size 3"))?;
-//                         return Ok(Operation::Read { key, value })
-//                     },
-//                     "w" => {
-//                         let from_key = seq.next_element()?.ok_or_else(|| de::Error::invalid_length(1, &"array of size 3"))?;
-//                         let to_key = seq.next_element()?.ok_or_else(|| de::Error::invalid_length(2, &"array of size 3"))?;
-//                         return Ok(Operation::Write { from_key, to_key })
-//                     },
-//                     _ => {
-//                         return Err(de::Error::invalid_value(de::Unexpected::Other("string other than \"w\" or \"r\""), &"a string with value \"w\" or \"r\""))
-//                     }
-//                 }
-//             }
-//         }
-//         trace!("estem aqui");
-//         let variants: &'static [&'static str] = &["Read", "Write"];
-//         deserializer.deserialize_enum("Operation", variants, OperationVisitor)
-//     }
-// }
 
 #[cfg(test)]
 mod test {
@@ -165,10 +143,7 @@ mod test {
             r#"["r",15,null]"#,
             serde_json::to_string(&read_req).unwrap()
         );
-        let write = Operation::Write {
-            from_key: 7,
-            to_key: 12,
-        };
+        let write = Operation::Write { key: 7, value: 12 };
         assert_eq!(r#"["w",7,12]"#, serde_json::to_string(&write).unwrap());
     }
 
@@ -198,10 +173,7 @@ mod test {
                 .try_into()
                 .unwrap()
         );
-        let write = Operation::Write {
-            from_key: 7,
-            to_key: 12,
-        };
+        let write = Operation::Write { key: 7, value: 12 };
         let raw = r#"["w",7,12]"#;
         assert_eq!(
             write,
