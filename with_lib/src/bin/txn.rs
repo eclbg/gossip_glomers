@@ -6,6 +6,7 @@ use std::{
 use async_trait::async_trait;
 use log::debug;
 use maelstrom::{protocol::Message, Node, Result, Runtime};
+use serde::de;
 use serde::{ser::SerializeSeq, Deserialize, Serialize};
 
 pub(crate) fn main() -> Result<()> {
@@ -61,7 +62,7 @@ enum RequestBody {
         node_ids: Vec<String>,
     },
     #[serde(rename = "txn")]
-    Transaction { txn: Vec<SerdeOperation> },
+    Transaction { txn: Vec<Operation> },
 }
 
 #[derive(Serialize, Debug)]
@@ -102,26 +103,30 @@ impl Serialize for Operation {
     }
 }
 
-#[derive(Debug, Deserialize, Serialize)]
-struct SerdeOperation(char, usize, Option<usize>);
+impl<'de> Deserialize<'de> for Operation {
+    fn deserialize<D>(deserializer: D) -> std::result::Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        #[derive(Deserialize)]
+        struct InnerOperation(char, usize, Option<usize>);
 
-impl TryInto<Operation> for SerdeOperation {
-    fn try_into(self) -> std::result::Result<Operation, Self::Error> {
-        let type_ = self.0;
-        match type_ {
+        let inner = InnerOperation::deserialize(deserializer)?;
+        match inner.0 {
             'r' => Ok(Operation::Read {
-                key: self.1,
-                value: self.2,
+                key: inner.1,
+                value: inner.2,
             }),
             'w' => Ok(Operation::Write {
-                key: self.1,
-                value: self.2.expect("must be a value"),
+                key: inner.1,
+                value: inner.2.expect("must be a value"),
             }),
-            _ => Err(()),
+            x => Err(de::Error::custom(format!(
+                "found unexpected operation type {}",
+                x
+            ))),
         }
     }
-
-    type Error = ();
 }
 
 #[cfg(test)]
@@ -154,33 +159,15 @@ mod test {
             value: Some(10),
         };
         let raw = r#"["r",15,10]"#;
-        assert_eq!(
-            read_resp,
-            serde_json::from_str::<SerdeOperation>(&raw)
-                .unwrap()
-                .try_into()
-                .unwrap()
-        );
+        assert_eq!(read_resp, serde_json::from_str::<Operation>(&raw).unwrap());
         let read_req = Operation::Read {
             key: 15,
             value: None,
         };
         let raw = r#"["r",15,null]"#;
-        assert_eq!(
-            read_req,
-            serde_json::from_str::<SerdeOperation>(&raw)
-                .unwrap()
-                .try_into()
-                .unwrap()
-        );
+        assert_eq!(read_req, serde_json::from_str::<Operation>(&raw).unwrap());
         let write = Operation::Write { key: 7, value: 12 };
         let raw = r#"["w",7,12]"#;
-        assert_eq!(
-            write,
-            serde_json::from_str::<SerdeOperation>(&raw)
-                .unwrap()
-                .try_into()
-                .unwrap()
-        );
+        assert_eq!(write, serde_json::from_str::<Operation>(&raw).unwrap());
     }
 }
