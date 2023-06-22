@@ -1,30 +1,26 @@
-use std::sync::Arc;
+use std::{
+    collections::HashMap,
+    sync::{Arc, Mutex},
+};
 
 use async_trait::async_trait;
 use log::debug;
-use maelstrom::{
-    kv::{seq_kv, Storage, KV},
-    protocol::Message,
-    Node, Result, Runtime,
-};
+use maelstrom::{protocol::Message, Node, Result, Runtime};
 use serde::de;
 use serde::{ser::SerializeSeq, Deserialize, Serialize};
-use tokio_context::context::Context;
 
 pub(crate) fn main() -> Result<()> {
     Runtime::init(try_main())
 }
 
-#[derive(Clone)]
+#[derive(Clone, Default)]
 struct Handler {
-    storage: Storage,
+    storage: Arc<Mutex<HashMap<usize, usize>>>,
 }
 
 async fn try_main() -> Result<()> {
     let runtime = Runtime::new();
-    let handler = Arc::new(Handler {
-        storage: seq_kv(runtime.clone()),
-    });
+    let handler = Arc::new(Handler::default());
     runtime.with_handler(handler).run().await
 }
 
@@ -40,20 +36,12 @@ impl Node for Handler {
                 for op in ops.iter_mut() {
                     match op {
                         Operation::Read { key, value } => {
-                            let read_res = self
-                                .storage
-                                .get(Context::new().0, key.to_string())
-                                .await;
-                            *value = match read_res {
-                                Ok(val) => Some(val),
-                                Err(_) => None,
-                            };
+                            *value = self.storage.lock().unwrap().get(&key).copied();
                         }
-                        Operation::Write { key, value } => self
-                            .storage
-                            .put(Context::new().0, key.to_string(), value)
-                            .await
-                            .unwrap(),
+                        Operation::Write { key, value } => {
+                            let mut s = self.storage.lock().unwrap();
+                            s.entry(key.clone()).or_insert_with(|| value.clone());
+                        }
                     }
                 }
                 debug!("{:?}", ops);
